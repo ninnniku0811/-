@@ -1,11 +1,52 @@
 import os
-from pykakasi import kakasi
+import re
 
-kks = kakasi()
+from fugashi import Tagger
+from kanjize import number2kanji
+
+tagger = Tagger()
+
+def convert_numbers(text):
+
+    def repl(m):
+        try:
+            return number2kanji(int(m.group()))
+        except:
+            return m.group()
+
+    return re.sub(r"\d+", repl, text)
+
 
 def kanafy(text):
-    result = kks.convert(text)
-    return "".join(x["hira"] for x in result)
+
+    text = convert_numbers(text)
+
+    text = text.replace("&", "アンド")
+    text = text.replace("＆", "アンド")
+
+    result = []
+
+    for word in tagger(text):
+
+        kana = None
+
+        try:
+            kana = word.feature.kana
+        except:
+            pass
+
+        if not kana:
+            try:
+                kana = word.feature.kanaBase
+            except:
+                pass
+
+        if kana:
+            result.append(kana)
+        else:
+            result.append(word.surface)
+
+    return "".join(result)
 
 
 # ===========================
@@ -180,19 +221,19 @@ def compress_ei_ou(seq):
     return result
 
 
-def remove_triple_from_left(seq):
+def remove_duplicates_with_last_rollback(seq):
+
     while True:
+
         changed = False
 
         i = 0
+
         while i < len(seq) - 1:
-            if seq[i] in ["あ","い","う","え","お"] and seq[i] == seq[i+1]:
 
-                j = i + 1
-                while j < len(seq) and seq[j] == seq[i]:
-                    j += 1
+            if seq[i] == seq[i + 1]:
 
-                candidate = seq[:i+1] + seq[j:]
+                candidate = seq[:i + 1] + seq[i + 2:]
 
                 if len(candidate) < 4:
                     return seq, True
@@ -272,13 +313,15 @@ def extract(word, rule=2):
 
     word = kanafy(word)
 
+    word = apply_step0(word)
+
     seq, _ = apply_step1(word)
 
     # ② えい→え、おう→お
     seq = compress_ei_ou(seq)
 
     # ③ 3連続母音圧縮
-    seq, stop = remove_triple_from_left(seq)
+    seq, stop = remove_duplicates_with_last_rollback(seq)
     if stop:
         return "".join(remove_non_vowels(seq))
 
@@ -286,7 +329,7 @@ def extract(word, rule=2):
     vowels = remove_non_vowels(seq)
 
     # ⑤ 連続母音圧縮
-    vowels, stop = remove_triple_from_left(vowels)
+    vowels, stop = remove_duplicates_with_last_rollback(vowels)
     if stop:
         return "".join(vowels)
 
@@ -303,7 +346,7 @@ def extract(word, rule=2):
             return "".join(vowels)
 
     # ⑧
-    vowels, stop = remove_triple_from_left(vowels)
+    vowels, stop = remove_duplicates_with_last_rollback(vowels)
     if stop:
         return "".join(vowels)
 
@@ -311,6 +354,25 @@ def extract(word, rule=2):
     vowels, stop = compress_pair_repeat(vowels)
 
     return "".join(vowels)
+
+
+# ===========================
+# 母音検索用
+# ③→④→⑥のみ
+# ===========================
+
+def extract_vowel_search(word):
+
+    word = kanafy(word)
+
+    word = apply_step0(word)
+
+    seq, _ = apply_step1(word)
+
+    vowels = remove_non_vowels(seq)
+
+    return "".join(vowels)
+
 
 # ===========================
 # words.txt
@@ -481,6 +543,11 @@ rule_label = st.radio(
     index=1
 )
 rule = rule_names[rule_label]
+search_mode = st.radio(
+    "検索方法",
+    ["単語で検索", "母音で検索"],
+    horizontal=True,
+)
 
 @st.cache_data
 def load_dictionary(rule):
@@ -493,10 +560,15 @@ st.caption(f"登録単語数: {count:,}")
 query = st.text_input("検索語")
 
 if query:
-    key = extract(query, rule)
+
+    if search_mode == "単語で検索":
+        key = extract(query, rule)
+    else:
+        key = extract_vowel_search(query)
+
     results = vowel_dict.get(key, [])
 
-    st.write("母音キー:", key)
+    st.write("検索キー:", key)
     st.write("一致件数:", len(results))
 
     if results:
@@ -512,4 +584,5 @@ with st.expander("変換テスト"):
     t = st.text_input("テスト文字列", key="test")
     if t:
         st.write("かな:", kanafy(t))
-        st.write("抽出:", extract(t, rule))
+        st.write("単語検索キー:", extract(t, rule))
+        st.write("母音検索キー:", extract_vowel_search(t))
