@@ -1,3 +1,5 @@
 streamlit
-pykakasi
 pandas
+fugashi
+unidic-lite
+kanjize
