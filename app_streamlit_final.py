@@ -159,161 +159,158 @@ def apply_step1(word):
 # やわめ：途中の「う」「い」を消す
 # ===========================
 
-def apply_step3(vowels, positions, remove_i=False):
-
-    result_v = []
-    result_p = []
-    removed = []
-
-    targets = ["う"]
-
-    if remove_i:
-        targets.append("い")
-
-    for idx, (v, p) in enumerate(zip(vowels, positions)):
-
-        if v in targets and 0 < idx < len(vowels) - 1:
-            removed.append((len(result_v), v, p))
-            continue
-
-        result_v.append(v)
-        result_p.append(p)
-
-    while len(result_v) < 4 and removed:
-        insert_idx, v, p = removed.pop()
-        result_v.insert(insert_idx, v)
-        result_p.insert(insert_idx, p)
-
-    return result_v, result_p
-
 
 # ===========================
-# Step5
-# ん削除・連続母音圧縮・繰り返し圧縮
+# 新仕様用関数
 # ===========================
 
-def compress_consecutive(vowels, keep_min_4=False):
-
-    compressed = []
-    removed = []
-
-    for v in vowels:
-
-        if not compressed:
-            compressed.append(v)
-
-        elif compressed[-1] == v:
-            removed.append((len(compressed), v))
-
-        else:
-            compressed.append(v)
-
-    # かためのみ：
-    # 圧縮で4文字未満になる場合は、後ろ側から復活
-    if keep_min_4:
-        while len(compressed) < 4 and removed:
-            pos, v = removed.pop()
-            compressed.insert(pos, v)
-
-    return compressed
-
-
-def compress_repeated_blocks(vowels):
-
+def compress_ei_ou(seq):
+    result = []
     i = 0
+    while i < len(seq):
+        if i + 1 < len(seq) and seq[i] == "え" and seq[i + 1] == "い":
+            result.append("え")
+            i += 2
+        elif i + 1 < len(seq) and seq[i] == "お" and seq[i + 1] == "う":
+            result.append("お")
+            i += 2
+        else:
+            result.append(seq[i])
+            i += 1
+    return result
 
-    while i < len(vowels):
 
-        max_block = (len(vowels) - i) // 2
-        compressed_flag = False
+def remove_triple_from_left(seq):
+    while True:
+        changed = False
 
-        for size in range(1, max_block + 1):
+        i = 0
+        while i < len(seq) - 1:
+            if seq[i] in ["あ","い","う","え","お"] and seq[i] == seq[i+1]:
 
-            block = vowels[i:i + size]
-            repeat = 1
+                j = i + 1
+                while j < len(seq) and seq[j] == seq[i]:
+                    j += 1
 
-            while vowels[
-                i + repeat * size:
-                i + (repeat + 1) * size
-            ] == block:
-                repeat += 1
+                candidate = seq[:i+1] + seq[j:]
 
-            if repeat > 1:
+                if len(candidate) < 4:
+                    return seq, True
 
-                candidate = (
-                    vowels[:i + size]
-                    +
-                    vowels[i + repeat * size:]
-                )
-
-                if len(candidate) >= 4:
-                    vowels = candidate
-                    compressed_flag = True
-
+                seq = candidate
+                changed = True
                 break
 
-        if not compressed_flag:
             i += 1
 
-    return vowels
+        if not changed:
+            return seq, False
 
 
-def apply_step5(vowels, rule):
+def remove_non_vowels(seq):
+    return [x for x in seq if x in ["あ","い","う","え","お"]]
 
-    vowels = [
-        v for v in vowels
-        if v != "ん" and v != ""
-    ]
 
-    if rule == 1:
-        # かため：
-        # 連続母音だけ圧縮
-        # ただし4文字未満になるなら後ろから復活
-        # 繰り返し羅列の圧縮はしない
-        vowels = compress_consecutive(vowels, keep_min_4=True)
+def remove_middle_vowel_from_left(vowels, target):
+    while True:
+        removed = False
+        for i in range(1, len(vowels)-1):
+            if vowels[i] == target:
+                candidate = vowels[:i] + vowels[i+1:]
+                if len(candidate) < 4:
+                    return vowels, True
+                vowels = candidate
+                removed = True
+                break
+        if not removed:
+            return vowels, False
 
-    else:
-        # ふつう・やわめ
-        vowels = compress_consecutive(vowels, keep_min_4=False)
-        vowels = compress_repeated_blocks(vowels)
 
-    return vowels
+def compress_pair_repeat(vowels):
+
+    i = 0
+    while i < len(vowels) - 3:
+
+        found = False
+
+        for size in range(2, (len(vowels) - i)//2 + 1):
+
+            block = vowels[i:i+size]
+            repeat = 1
+
+            while vowels[i+repeat*size:i+(repeat+1)*size] == block:
+                repeat += 1
+
+            if repeat >= 2:
+
+                keep = 1 if repeat == 2 else 2
+
+                candidate = (
+                    vowels[:i]
+                    + block * keep
+                    + vowels[i + repeat*size:]
+                )
+
+                if len(candidate) < 4:
+                    return vowels, True
+
+                vowels = candidate
+                found = True
+                break
+
+        if not found:
+            i += 1
+
+    return vowels, False
 
 
 # ===========================
-# 母音抽出
-# 1 = かため
-# 2 = ふつう
-# 3 = やわめ
+# 母音抽出（新仕様）
 # ===========================
 
 def extract(word, rule=2):
 
     word = kanafy(word)
 
-    s0 = apply_step0(word)
+    seq, _ = apply_step1(word)
 
-    s1, p1 = apply_step1(s0)
+    # ② えい→え、おう→お
+    seq = compress_ei_ou(seq)
 
-    if rule == 1:
-        # かため：途中のう・いは消さない
-        s3, p3 = s1, p1
+    # ③ 3連続母音圧縮
+    seq, stop = remove_triple_from_left(seq)
+    if stop:
+        return "".join(remove_non_vowels(seq))
 
-    elif rule == 2:
-        # ふつう：途中のうを消す
-        s3, p3 = apply_step3(s1, p1, remove_i=False)
+    # ④ 母音以外削除
+    vowels = remove_non_vowels(seq)
 
-    elif rule == 3:
-        # やわめ：途中のう・いを消す
-        s3, p3 = apply_step3(s1, p1, remove_i=True)
+    # ⑤ 連続母音圧縮
+    vowels, stop = remove_triple_from_left(vowels)
+    if stop:
+        return "".join(vowels)
 
-    else:
-        s3, p3 = s1, p1
+    # ⑥
+    if rule >= 2:
+        vowels, stop = remove_middle_vowel_from_left(vowels, "う")
+        if stop:
+            return "".join(vowels)
 
-    s5 = apply_step5(s3, rule)
+    # ⑦
+    if rule >= 3:
+        vowels, stop = remove_middle_vowel_from_left(vowels, "い")
+        if stop:
+            return "".join(vowels)
 
-    return "".join(s5)
+    # ⑧
+    vowels, stop = remove_triple_from_left(vowels)
+    if stop:
+        return "".join(vowels)
 
+    # ⑨
+    vowels, stop = compress_pair_repeat(vowels)
+
+    return "".join(vowels)
 
 # ===========================
 # words.txt
