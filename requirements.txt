@@ -1,5 +1,0 @@
-streamlit
-pandas
-fugashi
-unidic-lite
-kanjize
