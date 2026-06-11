@@ -1,5 +1,7 @@
 import os
 import re
+import html
+import json
 
 from fugashi import Tagger
 from kanjize import number2kanji
@@ -521,8 +523,14 @@ def bud_dic(rl, us12):
             if vowel not in new_dict:
                 new_dict[vowel] = []
 
+            hard_vowel = ext_f_red(
+                red,
+                1,
+                us12
+            )
+
             new_dict[vowel].append(
-                (word, red_len)
+                (word, red_len, hard_vowel)
             )
 
             new_ct += 1
@@ -533,11 +541,152 @@ def bud_dic(rl, us12):
     return new_dict, new_ct
 
 
+
+# ===========================
+# 表示用
+# ===========================
+
+def has_same_hard_group(entries):
+
+    counts = {}
+
+    for item in entries:
+        if len(item) >= 3:
+            hard_key = item[2]
+        else:
+            hard_key = ""
+
+        counts[hard_key] = counts.get(hard_key, 0) + 1
+
+    return any(v >= 2 for v in counts.values())
+
+
+def make_grouped_lines(entries):
+
+    groups = []
+    index = {}
+
+    for item in entries:
+
+        word = item[0]
+        hard_key = item[2] if len(item) >= 3 else ""
+
+        if hard_key not in index:
+            index[hard_key] = len(groups)
+            groups.append({
+                "hard_key": hard_key,
+                "words": []
+            })
+
+        groups[index[hard_key]]["words"].append(word)
+
+    display_items = []
+    copy_words = []
+
+    for group in groups:
+
+        hard_key = group["hard_key"]
+        words = group["words"]
+
+        if len(words) >= 2:
+            display_items.append({
+                "type": "tag",
+                "text": f"ー{hard_key}ー"
+            })
+
+        for word in words:
+            display_items.append({
+                "type": "word",
+                "text": word
+            })
+            copy_words.append(word)
+
+        display_items.append({
+            "type": "blank",
+            "text": ""
+        })
+
+    if display_items and display_items[-1]["type"] == "blank":
+        display_items.pop()
+
+    return display_items, "\n".join(copy_words)
+
+
+def render_grouped_result(entries):
+
+    display_items, copy_text = make_grouped_lines(entries)
+
+    body_parts = []
+
+    for item in display_items:
+
+        text = html.escape(item["text"])
+
+        if item["type"] == "tag":
+            body_parts.append(f'<div class="tag">{text}</div>')
+        elif item["type"] == "blank":
+            body_parts.append('<div class="blank"></div>')
+        else:
+            body_parts.append(f'<div class="word">{text}</div>')
+
+    body_html = "\n".join(body_parts)
+    copy_json = json.dumps(copy_text, ensure_ascii=False)
+
+    box_html = f"""
+    <div class="result-box">
+        <button class="copy-btn" onclick='navigator.clipboard.writeText({copy_json}); this.innerText="コピー済み"; setTimeout(() => this.innerText="コピー", 1200);'>コピー</button>
+        <div class="result-body">
+            {body_html}
+        </div>
+    </div>
+    <style>
+        .result-box {{
+            position: relative;
+            border: 1px solid rgba(49, 51, 63, 0.2);
+            border-radius: 0.5rem;
+            padding: 2.4rem 1rem 1rem 1rem;
+            background: rgb(250, 250, 250);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            white-space: pre-wrap;
+            line-height: 1.9;
+            font-size: 0.95rem;
+        }}
+        .copy-btn {{
+            position: absolute;
+            top: 0.45rem;
+            right: 0.45rem;
+            border: 1px solid rgba(49, 51, 63, 0.25);
+            border-radius: 0.35rem;
+            background: white;
+            padding: 0.25rem 0.6rem;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }}
+        .copy-btn:hover {{
+            background: rgb(240, 242, 246);
+        }}
+        .tag {{
+            color: #7CFC00;
+            font-weight: 700;
+        }}
+        .word {{
+            color: #111;
+        }}
+        .blank {{
+            height: 0.8rem;
+        }}
+    </style>
+    """
+
+    height = max(180, min(900, 80 + len(display_items) * 30))
+    components.html(box_html, height=height, scrolling=True)
+
 # ===========================
 # GUI
 # ===========================
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="母音検索システム", layout="wide")
 
@@ -611,14 +760,23 @@ if qu:
 
     if res:
 
-        res_tx = "\n".join(
-            word for word, _ in res
+        use_grouped_view = (
+            sch_md == "単語で検索"
+            and rl >= 2
+            and has_same_hard_group(res)
         )
 
-        st.code(
-            res_tx,
-            language=None
-        )
+        if use_grouped_view:
+            render_grouped_result(res)
+        else:
+            res_tx = "\n".join(
+                item[0] for item in res
+            )
+
+            st.code(
+                res_tx,
+                language=None
+            )
 
     else:
         st.info("一致する単語はありません。")
