@@ -335,12 +335,12 @@ def cmp_dup_vw(seq):
 
         length = j - i
 
-        if length == 2:
-            target = 1
-        elif length >= 3:
+        # ばりかた用：同一母音が3文字以上連なっている場合だけ、
+        # 2文字になるまで先頭側から削る。2連続はそのまま残す。
+        if length >= 3:
             target = 2
         else:
-            target = 1
+            target = length
 
         runs.append([
             seq[i],
@@ -691,7 +691,7 @@ def render_grouped_result(entries):
     )
 
     height = max(120, min(900, 40 + len(display_items) * 22))
-    components.html(box_html, height=height, scrolling=True)
+    components.html(box_html, height=height, scrolling=False)
 
 
 import streamlit as st
@@ -746,6 +746,8 @@ def render_flash_html(
     answer_words=None,
     answer_key="",
     show_answer=False,
+    animate=True,
+    slide_dir="right",
 ):
 
     display_text = html.escape(display_text or "")
@@ -754,9 +756,10 @@ def render_flash_html(
     answer_words = answer_words or []
 
     prev_html = ""
-    if previous_text:
+    if previous_text and animate:
+        old_class = "flash-card-old-left" if slide_dir == "left" else "flash-card-old-right"
         prev_html = (
-            '<div class="flash-card flash-card-old">'
+            f'<div class="flash-card {old_class}">'
             f'{previous_text}'
             '</div>'
         )
@@ -775,10 +778,12 @@ def render_flash_html(
             rows.append(f'<div class="answer-word">{html.escape(word)}</div>')
         answer_html = '<div class="answer-box">' + ''.join(rows) + '</div>'
 
+    current_class = "flash-card-current" if animate else "flash-card-current-noanim"
+
     block = f"""
     <div class="flash-wrap">
         {prev_html}
-        <div class="flash-card flash-card-current" style="border-color:{card_border};">
+        <div class="flash-card {current_class}" style="border-color:{card_border};">
             {display_text}
         </div>
         {answer_html}
@@ -808,13 +813,21 @@ def render_flash_html(
     .flash-card-current{{
         animation:slideIn .18s ease-out both;
     }}
-    .flash-card-old{{
+    .flash-card-current-noanim{{
+        animation:none;
+    }}
+    .flash-card-old-right, .flash-card-old-left{{
         position:absolute;
         left:0;
         right:0;
         top:0;
         z-index:2;
+    }}
+    .flash-card-old-right{{
         animation:slideOutRight .26s ease-in both;
+    }}
+    .flash-card-old-left{{
+        animation:slideOutLeft .26s ease-in both;
     }}
     .answer-box{{
         margin-top:.8rem;
@@ -841,13 +854,20 @@ def render_flash_html(
         from{{transform:translateX(0);opacity:1;}}
         to{{transform:translateX(115%);opacity:.05;}}
     }}
+    @keyframes slideOutLeft{{
+        from{{transform:translateX(0);opacity:1;}}
+        to{{transform:translateX(-115%);opacity:.05;}}
+    }}
     @keyframes slideIn{{
         from{{transform:translateX(-4%);opacity:.65;}}
         to{{transform:translateX(0);opacity:1;}}
     }}
     </style>
     """
-    components.html(block, height=300 if show_answer else 130, scrolling=True)
+    base_height = 140
+    if show_answer:
+        base_height += 70 + len(answer_words) * 24
+    components.html(block, height=max(150, min(1200, base_height)), scrolling=False)
 
 
 def render_flashcard_section():
@@ -925,6 +945,8 @@ def render_flashcard_section():
             "flash_card_output_mode": output_mode,
             "flash_card_display": "",
             "flash_card_previous_display": "",
+            "flash_card_anim": False,
+            "flash_card_slide_dir": "right",
         }
 
         for k, v in init_values.items():
@@ -948,6 +970,8 @@ def render_flashcard_section():
             st.session_state.flash_card_output_mode = output_mode
             st.session_state.flash_card_display = ""
             st.session_state.flash_card_previous_display = ""
+            st.session_state.flash_card_anim = False
+            st.session_state.flash_card_slide_dir = "right"
 
         if st.button("めくる", key="flash_flip"):
 
@@ -957,6 +981,8 @@ def render_flashcard_section():
                 selected_words = [item[0] for item in selected_entries]
 
                 st.session_state.flash_card_previous_display = st.session_state.flash_card_display
+                st.session_state.flash_card_anim = bool(st.session_state.flash_card_display)
+                st.session_state.flash_card_slide_dir = random.choice(["left", "right"])
                 st.session_state.flash_card_key = selected_key
                 st.session_state.flash_card_words = selected_words
                 st.session_state.flash_card_answer = False
@@ -967,6 +993,8 @@ def render_flashcard_section():
                     st.session_state.flash_card_display = selected_key
             else:
                 st.session_state.flash_card_previous_display = st.session_state.flash_card_display
+                st.session_state.flash_card_anim = bool(st.session_state.flash_card_display)
+                st.session_state.flash_card_slide_dir = random.choice(["left", "right"])
                 st.session_state.flash_card_key = ""
                 st.session_state.flash_card_words = []
                 st.session_state.flash_card_answer = False
@@ -983,6 +1011,30 @@ def render_flashcard_section():
                     answer_words=st.session_state.flash_card_words,
                     answer_key=st.session_state.flash_card_key,
                     show_answer=st.session_state.flash_card_answer,
+                    animate=st.session_state.flash_card_anim and not st.session_state.flash_card_answer,
+                    slide_dir=st.session_state.flash_card_slide_dir,
+                )
+
+                st.markdown(
+                    """
+                    <style>
+                    div[data-testid="stButton"] button[kind="secondary"]{
+                        min-height:82px;
+                        border:5px solid #ff315f;
+                        border-radius:12px;
+                        background:rgba(0,0,0,.20);
+                        color:white;
+                        font-size:2rem;
+                        font-weight:800;
+                    }
+                    div[data-testid="stButton"] button[kind="secondary"]:hover{
+                        border-color:#ff315f;
+                        color:white;
+                        background:rgba(0,0,0,.30);
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
                 )
 
                 if st.button(
@@ -991,6 +1043,8 @@ def render_flashcard_section():
                     use_container_width=True,
                 ):
                     st.session_state.flash_card_answer = True
+                    st.session_state.flash_card_anim = False
+                    st.session_state.flash_card_previous_display = ""
                     st.rerun()
 
             else:
