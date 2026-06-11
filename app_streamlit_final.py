@@ -752,86 +752,31 @@ def render_flying_words_background():
 
         spans.append(f'<span class="fly-word fly-word-{i}">{word}</span>')
         css_parts.append(
-            f"""
-            .fly-word-{i}{{
-                left:{x}vw;
-                top:{y}vh;
-                font-size:clamp(1.1rem, {size:.2f}vw, 3.2rem);
-                animation-delay:{delay}s;
-                --dx:{dx};
-                --dy:{dy};
-                --start-rot:{start_rot}deg;
-                --end-rot:{end_rot}deg;
-            }}
-            """
+            f'.fly-word-{i}{{left:{x}vw;top:{y}vh;font-size:clamp(1.1rem,{size:.2f}vw,3.2rem);animation-delay:{delay}s;--dx:{dx};--dy:{dy};--start-rot:{start_rot}deg;--end-rot:{end_rot}deg;}}'
         )
 
-    bg_html = f"""
-    <div class="flying-words-bg" aria-hidden="true">
-        {''.join(spans)}
-    </div>
-    <style>
-    .flying-words-bg{{
-        position:fixed;
-        inset:0;
-        width:100vw;
-        height:100vh;
-        pointer-events:none;
-        overflow:hidden;
-        z-index:0;
-    }}
-    .stApp > header,
-    .stApp [data-testid="stToolbar"],
-    .stApp [data-testid="stDecoration"],
-    .stApp [data-testid="stStatusWidget"],
-    .stApp [data-testid="stAppViewContainer"]{{
-        position:relative;
-        z-index:1;
-    }}
-    .stApp [data-testid="stAppViewContainer"]{{
-        background:transparent;
-    }}
-    .fly-word{{
-        position:absolute;
-        display:inline-block;
-        color:rgba(255,255,255,.10);
-        font-weight:900;
-        letter-spacing:.05em;
-        white-space:nowrap;
-        text-shadow:0 1px 10px rgba(0,0,0,.12);
-        user-select:none;
-        opacity:0;
-        transform:translate(0,0) rotate(var(--start-rot));
-        animation:flyWord 24s linear infinite;
-        will-change:transform, opacity;
-    }}
-    {''.join(css_parts)}
-    @keyframes flyWord{{
-        0%{{
-            opacity:0;
-            transform:translate(0,0) rotate(var(--start-rot));
-        }}
-        2%{{opacity:.10;}}
-        8%{{opacity:.08;}}
-        15%{{
-            opacity:0;
-            transform:translate(var(--dx), var(--dy)) rotate(var(--end-rot));
-        }}
-        100%{{
-            opacity:0;
-            transform:translate(var(--dx), var(--dy)) rotate(var(--end-rot));
-        }}
-    }}
-    @media (max-width: 640px){{
-        .fly-word{{
-            color:rgba(255,255,255,.08);
-            max-width:90vw;
-        }}
-    }}
-    </style>
-    """
+    # st.markdown だと環境によって <style> 内の @keyframes が本文として表示されることがあるため、
+    # CSS/HTML 注入専用の st.html を使う。
+    bg_html = (
+        '<div class="flying-words-bg" aria-hidden="true">'
+        + ''.join(spans)
+        + '</div>'
+        + '<style>'
+        + '.flying-words-bg{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;overflow:hidden;z-index:0;}'
+        + '.stApp header,.stApp [data-testid="stToolbar"],.stApp [data-testid="stDecoration"],.stApp [data-testid="stStatusWidget"],.stApp [data-testid="stAppViewContainer"]{position:relative;z-index:1;}'
+        + '.stApp [data-testid="stAppViewContainer"]{background:transparent;}'
+        + '.stApp .block-container{position:relative;z-index:2;}'
+        + '.fly-word{position:absolute;display:inline-block;color:rgba(20,120,80,.13);font-weight:900;letter-spacing:.05em;white-space:nowrap;text-shadow:0 1px 10px rgba(0,0,0,.08);user-select:none;opacity:0;transform:translate(0,0) rotate(var(--start-rot));animation:flyWord 24s linear infinite;will-change:transform,opacity;}'
+        + ''.join(css_parts)
+        + '@keyframes flyWord{0%{opacity:0;transform:translate(0,0) rotate(var(--start-rot));}2%{opacity:.16;}8%{opacity:.12;}15%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}}'
+        + '@media (max-width:640px){.fly-word{color:rgba(20,120,80,.10);max-width:90vw;}}'
+        + '</style>'
+    )
 
-    st.markdown(bg_html, unsafe_allow_html=True)
+    if hasattr(st, "html"):
+        st.html(bg_html)
+    else:
+        st.markdown(bg_html, unsafe_allow_html=True)
 
 # ===========================
 # 母音フラッシュカード用
