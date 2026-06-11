@@ -2,6 +2,7 @@ import os
 import re
 import html
 import json
+import random
 
 from fugashi import Tagger
 from kanjize import number2kanji
@@ -692,12 +693,199 @@ def render_grouped_result(entries):
     height = max(120, min(900, 40 + len(display_items) * 22))
     components.html(box_html, height=height, scrolling=True)
 
+
+import streamlit as st
+import streamlit.components.v1 as components
+
+# ===========================
+# 母音フラッシュカード用
+# ===========================
+
+def len_match_key(key, len_label):
+
+    if len_label == "4":
+        return len(key) == 4
+    if len_label == "5":
+        return len(key) == 5
+    if len_label == "6":
+        return len(key) == 6
+    return len(key) >= 7
+
+@st.cache_data
+def ld_flash_dic(
+    rl,
+    us12
+):
+    return bud_dic(
+        rl,
+        us12
+    )
+
+def get_flash_candidates(vowel_dict, len_label):
+
+    candidates = []
+
+    for key, entries in vowel_dict.items():
+
+        if not len_match_key(key, len_label):
+            continue
+
+        if len(entries) < 2:
+            continue
+
+        candidates.append(key)
+
+    candidates.sort()
+
+    return candidates
+
+def render_flashcard_section():
+
+    st.markdown("---")
+    st.subheader("母音フラッシュカード")
+
+    with st.container(border=True):
+
+        flash_rl_nm = {
+            "ばりかた": 0,
+            "かため": 1,
+            "ふつう": 2,
+            "やわめ": 3,
+        }
+
+        flash_rl_lb = st.radio(
+            "フラッシュカードの変換ルール",
+            list(flash_rl_nm.keys()),
+            horizontal=True,
+            index=2,
+            key="flash_rule"
+        )
+
+        st.markdown("**文字数を指定**")
+        len_label = st.radio(
+            "文字数を指定",
+            ["4", "5", "6", "7以上"],
+            horizontal=True,
+            index=0,
+            key="flash_len",
+            label_visibility="collapsed"
+        )
+
+        flash_rl = flash_rl_nm[flash_rl_lb]
+        flash_us12 = False if flash_rl == 0 else True
+
+        flash_dic, flash_ct = ld_flash_dic(
+            flash_rl,
+            flash_us12
+        )
+
+        candidates = get_flash_candidates(
+            flash_dic,
+            len_label
+        )
+
+        st.caption(
+            f"対象母音数: {len(candidates):,} / 登録単語数: {flash_ct:,}"
+        )
+
+        if "flash_card_key" not in st.session_state:
+            st.session_state.flash_card_key = ""
+        if "flash_card_words" not in st.session_state:
+            st.session_state.flash_card_words = []
+        if "flash_card_answer" not in st.session_state:
+            st.session_state.flash_card_answer = False
+        if "flash_card_rule" not in st.session_state:
+            st.session_state.flash_card_rule = flash_rl_lb
+        if "flash_card_len" not in st.session_state:
+            st.session_state.flash_card_len = len_label
+
+        changed_cond = (
+            st.session_state.flash_card_rule != flash_rl_lb
+            or st.session_state.flash_card_len != len_label
+        )
+
+        if changed_cond:
+            st.session_state.flash_card_key = ""
+            st.session_state.flash_card_words = []
+            st.session_state.flash_card_answer = False
+            st.session_state.flash_card_rule = flash_rl_lb
+            st.session_state.flash_card_len = len_label
+
+        if st.button("めくる", key="flash_flip"):
+
+            if candidates:
+                selected_key = random.choice(candidates)
+                selected_entries = flash_dic[selected_key]
+
+                st.session_state.flash_card_key = selected_key
+                st.session_state.flash_card_words = [
+                    item[0] for item in selected_entries
+                ]
+                st.session_state.flash_card_answer = False
+            else:
+                st.session_state.flash_card_key = ""
+                st.session_state.flash_card_words = []
+                st.session_state.flash_card_answer = False
+
+        if candidates:
+
+            if st.session_state.flash_card_key:
+                card_key = html.escape(st.session_state.flash_card_key)
+                st.markdown(
+                    f"""
+                    <div style="
+                        margin: 1rem 0 .8rem 0;
+                        padding: 1.2rem 1rem;
+                        border: 4px solid #20c878;
+                        border-radius: .6rem;
+                        text-align: center;
+                        font-size: 2.2rem;
+                        font-weight: 700;
+                        color: white;
+                        background: rgba(0,0,0,.25);
+                    ">{card_key}</div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+                if st.button("答えを見る", key="flash_show_answer"):
+                    st.session_state.flash_card_answer = True
+
+                if st.session_state.flash_card_answer:
+                    ans_tx = "\n".join(
+                        st.session_state.flash_card_words
+                    )
+                    st.code(
+                        ans_tx,
+                        language=None
+                    )
+                else:
+                    st.markdown(
+                        """
+                        <div style="
+                            margin-top: .8rem;
+                            padding: 1.2rem 1rem;
+                            border: 4px solid #ff315f;
+                            border-radius: .6rem;
+                            text-align: center;
+                            font-size: 1.6rem;
+                            color: #555;
+                        ">答えを見る</div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+            else:
+                st.info("めくるボタンを押してください。")
+
+        else:
+            st.warning("この条件に合う、2語以上ある母音がありません。")
+
+
 # ===========================
 # GUI
 # ===========================
 
-import streamlit as st
-import streamlit.components.v1 as components
 
 st.set_page_config(page_title="母音検索システム", layout="wide")
 
@@ -804,3 +992,6 @@ with st.expander("変換テスト"):
             )
         )
         st.write("母音検索キー:", ext_vw_sch(t))
+
+
+render_flashcard_section()
