@@ -697,6 +697,130 @@ def render_grouped_result(entries):
 import streamlit as st
 import streamlit.components.v1 as components
 
+
+# ===========================
+# 背景アニメーション用
+# ===========================
+
+@st.cache_data
+def ld_bg_words():
+    words = []
+    try:
+        with open(wd_fl, encoding="utf-8") as f:
+            for line in f:
+                word = line.strip()
+                if word and not word.startswith("#"):
+                    words.append(word)
+    except Exception:
+        words = []
+
+    if not words:
+        words = ["あいうえお", "母音", "フラッシュカード"]
+
+    short_words = [w for w in words if len(w) <= 14]
+    return short_words or words
+
+
+def render_flying_words_background():
+    words = ld_bg_words()
+
+    directions = [
+        ("120vw", "0vh"),
+        ("-120vw", "0vh"),
+        ("0vw", "120vh"),
+        ("0vw", "-120vh"),
+        ("90vw", "90vh"),
+        ("-90vw", "90vh"),
+        ("90vw", "-90vh"),
+        ("-90vw", "-90vh"),
+    ]
+
+    spans = []
+    css_parts = []
+
+    # 2秒ごとに1つ出るよう、12個を24秒周期でずらして回す
+    for i in range(12):
+        word = html.escape(random.choice(words))
+        x = random.randint(0, 92)
+        y = random.randint(8, 88)
+        dx, dy = random.choice(directions)
+        start_rot = random.randint(-35, 35)
+        end_rot = start_rot + random.choice([-1, 1]) * random.randint(220, 520)
+        size = random.uniform(1.4, 3.2)
+        delay = i * 2
+
+        spans.append(f'<span class="fly-word fly-word-{i}">{word}</span>')
+        css_parts.append(
+            f"""
+            .fly-word-{i}{{
+                left:{x}vw;
+                top:{y}vh;
+                font-size:clamp(1.1rem, {size:.2f}vw, 3.2rem);
+                animation-delay:{delay}s;
+                --dx:{dx};
+                --dy:{dy};
+                --start-rot:{start_rot}deg;
+                --end-rot:{end_rot}deg;
+            }}
+            """
+        )
+
+    bg_html = f"""
+    <div class="flying-words-bg" aria-hidden="true">
+        {''.join(spans)}
+    </div>
+    <style>
+    .flying-words-bg{{
+        position:fixed;
+        inset:0;
+        width:100vw;
+        height:100vh;
+        pointer-events:none;
+        overflow:hidden;
+        z-index:999999;
+    }}
+    .fly-word{{
+        position:absolute;
+        display:inline-block;
+        color:rgba(255,255,255,.18);
+        font-weight:900;
+        letter-spacing:.05em;
+        white-space:nowrap;
+        text-shadow:0 1px 10px rgba(0,0,0,.12);
+        user-select:none;
+        opacity:0;
+        transform:translate(0,0) rotate(var(--start-rot));
+        animation:flyWord 24s linear infinite;
+        will-change:transform, opacity;
+    }}
+    {''.join(css_parts)}
+    @keyframes flyWord{{
+        0%{{
+            opacity:0;
+            transform:translate(0,0) rotate(var(--start-rot));
+        }}
+        2%{{opacity:.16;}}
+        8%{{opacity:.13;}}
+        15%{{
+            opacity:0;
+            transform:translate(var(--dx), var(--dy)) rotate(var(--end-rot));
+        }}
+        100%{{
+            opacity:0;
+            transform:translate(var(--dx), var(--dy)) rotate(var(--end-rot));
+        }}
+    }}
+    @media (max-width: 640px){{
+        .fly-word{{
+            color:rgba(255,255,255,.13);
+            max-width:90vw;
+        }}
+    }}
+    </style>
+    """
+
+    st.markdown(bg_html, unsafe_allow_html=True)
+
 # ===========================
 # 母音フラッシュカード用
 # ===========================
@@ -1164,7 +1288,6 @@ def render_flashcard_section():
             st.session_state.flash_card_previous_display = ""
             st.session_state.flash_card_anim = False
             st.session_state.flash_card_slide_dir = "right"
-            st.session_state.flash_card_history = []
 
         left_col, hist_col = st.columns([3.1, 1.25], gap="large")
 
@@ -1254,6 +1377,7 @@ def render_flashcard_section():
 st.set_page_config(page_title="母音検索システム", layout="wide")
 
 st.title("母音検索システム")
+render_flying_words_background()
 
 rl_nm = {
     "ばりかた": 0,
