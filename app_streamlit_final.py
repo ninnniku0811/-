@@ -695,7 +695,7 @@ def render_grouped_result(entries):
         '</style>'
     )
 
-    height = max(120, min(900, 40 + len(display_items) * 22))
+    height = max(120, min(10000, 40 + len(display_items) * 22))
     components.html(box_html, height=height, scrolling=False)
 
 
@@ -1014,7 +1014,7 @@ def render_flash_html(
         base_height += 85 + display_count * 22
         if output_mode == "単語で出力":
             base_height += 28
-    components.html(block, height=max(150, min(1800, base_height)), scrolling=False)
+    components.html(block, height=max(150, min(12000, base_height)), scrolling=False)
 
 
 def make_history_item(display, key, entries, output_mode):
