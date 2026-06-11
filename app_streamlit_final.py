@@ -582,7 +582,9 @@ def make_grouped_lines(entries):
 
     display_items = []
     copy_words = []
+    other_words = []
 
+    # 2語以上ある分類だけ先に表示
     for group in groups:
 
         hard_key = group["hard_key"]
@@ -594,23 +596,40 @@ def make_grouped_lines(entries):
                 "text": f"ー{hard_key}ー"
             })
 
-        for word in words:
+            for word in words:
+                display_items.append({
+                    "type": "word",
+                    "text": word
+                })
+                copy_words.append(word)
+
+            # グループ間だけ空ける
+            display_items.append({
+                "type": "blank",
+                "text": ""
+            })
+
+        else:
+            other_words.extend(words)
+
+    # 1語だけの分類は最後に「その他」としてまとめる
+    if other_words:
+        display_items.append({
+            "type": "tag",
+            "text": "ーその他ー"
+        })
+
+        for word in other_words:
             display_items.append({
                 "type": "word",
                 "text": word
             })
             copy_words.append(word)
 
-        display_items.append({
-            "type": "blank",
-            "text": ""
-        })
-
     if display_items and display_items[-1]["type"] == "blank":
         display_items.pop()
 
     return display_items, "\n".join(copy_words)
-
 
 def render_grouped_result(entries):
 
