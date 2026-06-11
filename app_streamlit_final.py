@@ -7,6 +7,11 @@ import random
 from fugashi import Tagger
 from kanjize import number2kanji
 
+import streamlit as st
+import streamlit.components.v1 as components
+
+st.set_page_config(page_title="母音検索システム", layout="wide")
+
 tagger = Tagger()
 
 def cv_num(text):
@@ -694,10 +699,6 @@ def render_grouped_result(entries):
     components.html(box_html, height=height, scrolling=False)
 
 
-import streamlit as st
-import streamlit.components.v1 as components
-
-
 # ===========================
 # 背景アニメーション用
 # ===========================
@@ -777,12 +778,23 @@ def render_flying_words_background():
         height:100vh;
         pointer-events:none;
         overflow:hidden;
-        z-index:999999;
+        z-index:0;
+    }}
+    .stApp > header,
+    .stApp [data-testid="stToolbar"],
+    .stApp [data-testid="stDecoration"],
+    .stApp [data-testid="stStatusWidget"],
+    .stApp [data-testid="stAppViewContainer"]{{
+        position:relative;
+        z-index:1;
+    }}
+    .stApp [data-testid="stAppViewContainer"]{{
+        background:transparent;
     }}
     .fly-word{{
         position:absolute;
         display:inline-block;
-        color:rgba(255,255,255,.18);
+        color:rgba(255,255,255,.10);
         font-weight:900;
         letter-spacing:.05em;
         white-space:nowrap;
@@ -799,8 +811,8 @@ def render_flying_words_background():
             opacity:0;
             transform:translate(0,0) rotate(var(--start-rot));
         }}
-        2%{{opacity:.16;}}
-        8%{{opacity:.13;}}
+        2%{{opacity:.10;}}
+        8%{{opacity:.08;}}
         15%{{
             opacity:0;
             transform:translate(var(--dx), var(--dy)) rotate(var(--end-rot));
@@ -812,7 +824,7 @@ def render_flying_words_background():
     }}
     @media (max-width: 640px){{
         .fly-word{{
-            color:rgba(255,255,255,.13);
+            color:rgba(255,255,255,.08);
             max-width:90vw;
         }}
     }}
@@ -1373,8 +1385,6 @@ def render_flashcard_section():
 # GUI
 # ===========================
 
-
-st.set_page_config(page_title="母音検索システム", layout="wide")
 
 st.title("母音検索システム")
 render_flying_words_background()
