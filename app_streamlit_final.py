@@ -739,6 +739,117 @@ def get_flash_candidates(vowel_dict, len_label):
 
     return candidates
 
+def render_flash_html(
+    display_text,
+    output_mode,
+    previous_text="",
+    answer_words=None,
+    answer_key="",
+    show_answer=False,
+):
+
+    display_text = html.escape(display_text or "")
+    previous_text = html.escape(previous_text or "")
+    answer_key = html.escape(answer_key or "")
+    answer_words = answer_words or []
+
+    prev_html = ""
+    if previous_text:
+        prev_html = (
+            '<div class="flash-card flash-card-old">'
+            f'{previous_text}'
+            '</div>'
+        )
+
+    if output_mode == "単語で出力":
+        card_border = "#ffb000"
+    else:
+        card_border = "#20c878"
+
+    answer_html = ""
+    if show_answer:
+        rows = []
+        if output_mode == "単語で出力" and answer_key:
+            rows.append(f'<div class="answer-key">母音：{answer_key}</div>')
+        for word in answer_words:
+            rows.append(f'<div class="answer-word">{html.escape(word)}</div>')
+        answer_html = '<div class="answer-box">' + ''.join(rows) + '</div>'
+
+    block = f"""
+    <div class="flash-wrap">
+        {prev_html}
+        <div class="flash-card flash-card-current" style="border-color:{card_border};">
+            {display_text}
+        </div>
+        {answer_html}
+    </div>
+    <style>
+    .flash-wrap{{
+        position:relative;
+        overflow:hidden;
+        margin:1rem 0 .8rem 0;
+    }}
+    .flash-card{{
+        padding:1.15rem 1rem;
+        border:5px solid #20c878;
+        border-radius:12px;
+        text-align:center;
+        font-size:2.2rem;
+        font-weight:800;
+        color:white;
+        background:rgba(0,0,0,.28);
+        line-height:1.25;
+        min-height:92px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-sizing:border-box;
+    }}
+    .flash-card-current{{
+        animation:slideIn .18s ease-out both;
+    }}
+    .flash-card-old{{
+        position:absolute;
+        left:0;
+        right:0;
+        top:0;
+        z-index:2;
+        animation:slideOutRight .26s ease-in both;
+    }}
+    .answer-box{{
+        margin-top:.8rem;
+        padding:.8rem 1rem;
+        border:3px solid #ff315f;
+        border-radius:10px;
+        background:rgba(255,255,255,.9);
+        font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+        font-size:1rem;
+        line-height:1.35;
+        white-space:normal;
+    }}
+    .answer-key{{
+        font-weight:800;
+        margin:0 0 .35rem 0;
+        color:#ff315f;
+    }}
+    .answer-word{{
+        margin:0;
+        padding:0;
+        color:#111;
+    }}
+    @keyframes slideOutRight{{
+        from{{transform:translateX(0);opacity:1;}}
+        to{{transform:translateX(115%);opacity:.05;}}
+    }}
+    @keyframes slideIn{{
+        from{{transform:translateX(-4%);opacity:.65;}}
+        to{{transform:translateX(0);opacity:1;}}
+    }}
+    </style>
+    """
+    components.html(block, height=300 if show_answer else 130, scrolling=True)
+
+
 def render_flashcard_section():
 
     st.markdown("---")
@@ -761,6 +872,25 @@ def render_flashcard_section():
             key="flash_rule"
         )
 
+        flash_rl = flash_rl_nm[flash_rl_lb]
+
+        if flash_rl == 0:
+            flash_us12 = False
+        else:
+            flash_us12 = st.checkbox(
+                "羅列を消す",
+                value=True,
+                key="flash_us12"
+            )
+
+        output_mode = st.radio(
+            "出力方法",
+            ["母音で出力", "単語で出力"],
+            horizontal=True,
+            index=0,
+            key="flash_output_mode"
+        )
+
         st.markdown("**文字数を指定**")
         len_label = st.radio(
             "文字数を指定",
@@ -770,9 +900,6 @@ def render_flashcard_section():
             key="flash_len",
             label_visibility="collapsed"
         )
-
-        flash_rl = flash_rl_nm[flash_rl_lb]
-        flash_us12 = False if flash_rl == 0 else True
 
         flash_dic, flash_ct = ld_flash_dic(
             flash_rl,
@@ -788,20 +915,27 @@ def render_flashcard_section():
             f"対象母音数: {len(candidates):,} / 登録単語数: {flash_ct:,}"
         )
 
-        if "flash_card_key" not in st.session_state:
-            st.session_state.flash_card_key = ""
-        if "flash_card_words" not in st.session_state:
-            st.session_state.flash_card_words = []
-        if "flash_card_answer" not in st.session_state:
-            st.session_state.flash_card_answer = False
-        if "flash_card_rule" not in st.session_state:
-            st.session_state.flash_card_rule = flash_rl_lb
-        if "flash_card_len" not in st.session_state:
-            st.session_state.flash_card_len = len_label
+        init_values = {
+            "flash_card_key": "",
+            "flash_card_words": [],
+            "flash_card_answer": False,
+            "flash_card_rule": flash_rl_lb,
+            "flash_card_len": len_label,
+            "flash_card_us12": flash_us12,
+            "flash_card_output_mode": output_mode,
+            "flash_card_display": "",
+            "flash_card_previous_display": "",
+        }
+
+        for k, v in init_values.items():
+            if k not in st.session_state:
+                st.session_state[k] = v
 
         changed_cond = (
             st.session_state.flash_card_rule != flash_rl_lb
             or st.session_state.flash_card_len != len_label
+            or st.session_state.flash_card_us12 != flash_us12
+            or st.session_state.flash_card_output_mode != output_mode
         )
 
         if changed_cond:
@@ -810,70 +944,54 @@ def render_flashcard_section():
             st.session_state.flash_card_answer = False
             st.session_state.flash_card_rule = flash_rl_lb
             st.session_state.flash_card_len = len_label
+            st.session_state.flash_card_us12 = flash_us12
+            st.session_state.flash_card_output_mode = output_mode
+            st.session_state.flash_card_display = ""
+            st.session_state.flash_card_previous_display = ""
 
         if st.button("めくる", key="flash_flip"):
 
             if candidates:
                 selected_key = random.choice(candidates)
                 selected_entries = flash_dic[selected_key]
+                selected_words = [item[0] for item in selected_entries]
 
+                st.session_state.flash_card_previous_display = st.session_state.flash_card_display
                 st.session_state.flash_card_key = selected_key
-                st.session_state.flash_card_words = [
-                    item[0] for item in selected_entries
-                ]
+                st.session_state.flash_card_words = selected_words
                 st.session_state.flash_card_answer = False
+
+                if output_mode == "単語で出力":
+                    st.session_state.flash_card_display = random.choice(selected_words)
+                else:
+                    st.session_state.flash_card_display = selected_key
             else:
+                st.session_state.flash_card_previous_display = st.session_state.flash_card_display
                 st.session_state.flash_card_key = ""
                 st.session_state.flash_card_words = []
                 st.session_state.flash_card_answer = False
+                st.session_state.flash_card_display = ""
 
         if candidates:
 
             if st.session_state.flash_card_key:
-                card_key = html.escape(st.session_state.flash_card_key)
-                st.markdown(
-                    f"""
-                    <div style="
-                        margin: 1rem 0 .8rem 0;
-                        padding: 1.2rem 1rem;
-                        border: 4px solid #20c878;
-                        border-radius: .6rem;
-                        text-align: center;
-                        font-size: 2.2rem;
-                        font-weight: 700;
-                        color: white;
-                        background: rgba(0,0,0,.25);
-                    ">{card_key}</div>
-                    """,
-                    unsafe_allow_html=True
+
+                render_flash_html(
+                    st.session_state.flash_card_display,
+                    output_mode,
+                    previous_text=st.session_state.flash_card_previous_display,
+                    answer_words=st.session_state.flash_card_words,
+                    answer_key=st.session_state.flash_card_key,
+                    show_answer=st.session_state.flash_card_answer,
                 )
 
-                if st.button("答えを見る", key="flash_show_answer"):
+                if st.button(
+                    "答えを出す",
+                    key="flash_show_answer_big",
+                    use_container_width=True,
+                ):
                     st.session_state.flash_card_answer = True
-
-                if st.session_state.flash_card_answer:
-                    ans_tx = "\n".join(
-                        st.session_state.flash_card_words
-                    )
-                    st.code(
-                        ans_tx,
-                        language=None
-                    )
-                else:
-                    st.markdown(
-                        """
-                        <div style="
-                            margin-top: .8rem;
-                            padding: 1.2rem 1rem;
-                            border: 4px solid #ff315f;
-                            border-radius: .6rem;
-                            text-align: center;
-                            font-size: 1.6rem;
-                            color: #555;
-                        ">答えを見る</div>
-                        """,
-                        unsafe_allow_html=True
-                    )
+                    st.rerun()
 
             else:
                 st.info("めくるボタンを押してください。")
@@ -911,7 +1029,7 @@ if rl == 0:
     us12 = False
 else:
     us12 = st.checkbox(
-        "⑫を適用する",
+        "羅列を消す",
         value=True
     )
 
