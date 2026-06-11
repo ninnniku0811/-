@@ -648,56 +648,48 @@ def render_grouped_result(entries):
         else:
             body_parts.append(f'<div class="word">{text}</div>')
 
-    body_html = "\n".join(body_parts)
+    # 余計なインデントや改行が表示に混ざらないように、HTMLは詰めて作る
+    body_html = "".join(body_parts)
     copy_json = json.dumps(copy_text, ensure_ascii=False)
 
-    box_html = f"""
-    <div class="result-box">
-        <button class="copy-btn" onclick='navigator.clipboard.writeText({copy_json}); this.innerText="コピー済み"; setTimeout(() => this.innerText="コピー", 1200);'>コピー</button>
-        <div class="result-body">
-            {body_html}
-        </div>
-    </div>
-    <style>
-        .result-box {{
-            position: relative;
-            border: 1px solid rgba(49, 51, 63, 0.2);
-            border-radius: 0.5rem;
-            padding: 2.4rem 1rem 1rem 1rem;
-            background: rgb(250, 250, 250);
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-            white-space: pre-wrap;
-            line-height: 1.9;
-            font-size: 0.95rem;
-        }}
-        .copy-btn {{
-            position: absolute;
-            top: 0.45rem;
-            right: 0.45rem;
-            border: 1px solid rgba(49, 51, 63, 0.25);
-            border-radius: 0.35rem;
-            background: white;
-            padding: 0.25rem 0.6rem;
-            cursor: pointer;
-            font-size: 0.8rem;
-        }}
-        .copy-btn:hover {{
-            background: rgb(240, 242, 246);
-        }}
-        .tag {{
-            color: #7CFC00;
-            font-weight: 700;
-        }}
-        .word {{
-            color: #111;
-        }}
-        .blank {{
-            height: 0.8rem;
-        }}
-    </style>
-    """
+    box_html = (
+        '<div class="result-box">'
+        f'<button class="copy-btn" onclick=\'navigator.clipboard.writeText({copy_json}); this.innerText="コピー済み"; setTimeout(() => this.innerText="コピー", 1200);\'>コピー</button>'
+        f'<div class="result-body">{body_html}</div>'
+        '</div>'
+        '<style>'
+        '.result-box{'
+        'position:relative;'
+        'border:1px solid rgba(49,51,63,.2);'
+        'border-radius:.5rem;'
+        'padding:.55rem 1rem .8rem 1rem;'
+        'background:rgb(250,250,250);'
+        'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;'
+        'font-size:.95rem;'
+        'line-height:1.25;'
+        'white-space:normal;'
+        '}'
+        '.copy-btn{'
+        'position:absolute;'
+        'top:.35rem;'
+        'right:.45rem;'
+        'border:1px solid rgba(49,51,63,.25);'
+        'border-radius:.35rem;'
+        'background:white;'
+        'padding:.2rem .55rem;'
+        'cursor:pointer;'
+        'font-size:.8rem;'
+        'line-height:1.2;'
+        '}'
+        '.copy-btn:hover{background:rgb(240,242,246);}'
+        '.result-body{margin:0;padding:0;}'
+        '.tag{color:#7CFC00;font-weight:700;margin:0;padding:0;line-height:1.35;}'
+        '.word{color:#111;margin:0;padding:0;line-height:1.35;}'
+        '.blank{height:.75rem;margin:0;padding:0;}'
+        '</style>'
+    )
 
-    height = max(180, min(900, 80 + len(display_items) * 30))
+    height = max(120, min(900, 40 + len(display_items) * 22))
     components.html(box_html, height=height, scrolling=True)
 
 # ===========================
@@ -780,8 +772,7 @@ if qu:
     if res:
 
         use_grouped_view = (
-            sch_md == "単語で検索"
-            and rl >= 2
+            rl >= 2
             and has_same_hard_group(res)
         )
 
