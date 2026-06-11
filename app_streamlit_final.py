@@ -739,8 +739,9 @@ def render_flying_words_background():
     spans = []
     css_parts = []
 
-    # 2秒ごとに1つ出るよう、12個を24秒周期でずらして回す
-    for i in range(12):
+    # 2秒ごとに1つ出続けるよう、40秒周期に対して20個をずらして回す
+    # 以前は12個だけだったため、最後の単語が出たあと次の周期まで空白時間ができていた。
+    for i in range(20):
         word = html.escape(random.choice(words))
         x = random.randint(0, 92)
         y = random.randint(8, 88)
