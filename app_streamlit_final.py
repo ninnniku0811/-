@@ -325,28 +325,12 @@ def prp_wd(word):
 
     return red
 
-def repl_non_vw_with_prev_vw(seq):
-
-    result = []
-    prev_vowel = None
-
-    for x in seq:
-
-        if x in ["あ", "い", "う", "え", "お"]:
-            result.append(x)
-            prev_vowel = x
-        else:
-            # ばりかた用：母音以外は削除せず、直前の母音に変える。
-            # ただし、直前に母音がない場合は無視する。
-            if prev_vowel is not None:
-                result.append(prev_vowel)
-
-    return result
-
+# 旧版で使っていた「母音以外を直前母音にする」処理は廃止。
+# 現在のばりかたでは rem_no_vw() で母音以外を削除する。
 
 def cmp_dup_vw(seq):
 
-    # ばりかた用：同一母音が3文字以上連なっている場合だけ、
+    # 現在のばりかた用：同一母音が4文字以上連なっている場合だけ、
     # 3文字になるまで先頭側から1文字ずつ削る。
     # 2連続・3連続はそのまま残す。
     while True:
@@ -379,26 +363,167 @@ def cmp_dup_vw(seq):
         if not changed:
             return seq, False
 
+
+def cmp_dup_vw_old_barikata(seq):
+
+    # 旧ばりかた用：
+    # 同一母音2連続は1文字まで、3連続以上は2文字まで残す。
+    # 削除すると全体が4文字未満になる場合は、その削除を行わず終了する。
+    runs = []
+
+    i = 0
+
+    while i < len(seq):
+
+        j = i + 1
+
+        while j < len(seq) and seq[j] == seq[i]:
+            j += 1
+
+        length = j - i
+
+        if length == 2:
+            target = 1
+        elif length >= 3:
+            target = 2
+        else:
+            target = 1
+
+        runs.append([seq[i], length, target])
+        i = j
+
+    while True:
+
+        changed = False
+
+        for run in runs:
+
+            if run[1] > run[2]:
+
+                candidate_len = sum(r[1] for r in runs) - 1
+
+                if candidate_len < 4:
+                    result = []
+                    for char, length, _ in runs:
+                        result.extend([char] * length)
+                    return result, True
+
+                run[1] -= 1
+                changed = True
+                break
+
+        if not changed:
+            break
+
+    result = []
+
+    for char, length, _ in runs:
+        result.extend([char] * length)
+
+    return result, False
+
+
+
+def othello_non_vowels_between_same_vowels(seq):
+
+    # かため用：母音以外が「同じ母音」に挟まれている場合、
+    # その母音に変換する。
+    # 例：おーお → おおお / あんあ → あああ
+    # 違う母音に挟まれているもの、片側しか母音がないものは後で削除する。
+    vowels = {"あ", "い", "う", "え", "お"}
+    seq = list(seq)
+    n = len(seq)
+    i = 0
+
+    while i < n:
+
+        if seq[i] in vowels:
+            i += 1
+            continue
+
+        start = i
+
+        while i < n and seq[i] not in vowels:
+            i += 1
+
+        end = i
+
+        left = seq[start - 1] if start - 1 >= 0 else None
+        right = seq[end] if end < n else None
+
+        if left in vowels and right in vowels and left == right:
+            for j in range(start, end):
+                seq[j] = left
+
+    return seq
+
+def ext_old_barikata_f_red(red):
+
+    # 「かため」用：旧ばりかたをベースにしつつ、
+    # 母音以外が同じ母音に挟まれた場合はオセロ方式でその母音に変える。
+    # それ以外の母音以外は削除する。
+    word = st0(red, remove_sokuon=False)
+    seq = st1(word)
+
+    seq = othello_non_vowels_between_same_vowels(seq)
+    seq = rem_no_vw(seq)
+
+    seq, stop = cmp_dup_vw_old_barikata(seq)
+
+    return "".join(seq)
+
+
+def ext_old_katame_group_f_red(red, us12=True):
+
+    # ふつう・やわめの分類タグを変えないため、
+    # タグ計算だけは従来の「かため」ルールを使う。
+    word = st0(red, remove_sokuon=True)
+    seq = st1(word)
+
+    seq, stop = rem_dup(seq)
+    if stop:
+        return "".join(rem_no_vw(seq))
+
+    vowels = rem_no_vw(seq)
+
+    vowels, stop = rem_dup(vowels)
+    if stop:
+        return "".join(vowels)
+
+    if us12:
+        vowels, stop = cmp_p_rep(vowels)
+
+    return "".join(vowels)
+
+
 def ext_f_red(
     red,
     rl=2,
     us12=True
 ):
 
-    word = st0(red, remove_sokuon=(rl != 0))
-
-    seq = st1(word)
-
     if rl == 0:
 
-        seq = repl_non_vw_with_prev_vw(seq)
+        # 現在のばりかた：母音以外は削除。
+        # 同一母音が4個以上連続している場合だけ、3個になるまで削る。
+        word = st0(red, remove_sokuon=False)
+        seq = st1(word)
+        seq = rem_no_vw(seq)
         seq, stop = cmp_dup_vw(seq)
 
         return "".join(seq)
 
-    else:
+    if rl == 1:
 
-        seq, stop = rem_dup(seq)
+        # かためは「旧ばりかた」ベース。
+        # 同じ母音に挟まれた母音以外は、その母音に変える。
+        return ext_old_barikata_f_red(red)
+
+    word = st0(red, remove_sokuon=True)
+
+    seq = st1(word)
+
+    seq, stop = rem_dup(seq)
     if stop:
         return "".join(rem_no_vw(seq))
 
@@ -515,9 +640,8 @@ def bud_dic(rl, us12):
             if vowel not in new_dict:
                 new_dict[vowel] = []
 
-            hard_vowel = ext_f_red(
+            hard_vowel = ext_old_katame_group_f_red(
                 red,
-                1,
                 us12
             )
 
