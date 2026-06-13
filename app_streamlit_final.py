@@ -609,37 +609,44 @@ def make_grouped_lines(entries):
     for item in entries:
 
         word = item[0]
+        red_len = item[1] if len(item) >= 2 else 0
         hard_key = item[2] if len(item) >= 3 else ""
 
         if hard_key not in index:
             index[hard_key] = len(groups)
             groups.append({
                 "hard_key": hard_key,
-                "words": []
+                "items": []
             })
 
-        groups[index[hard_key]]["words"].append(word)
+        groups[index[hard_key]]["items"].append({
+            "word": word,
+            "red_len": red_len,
+            "kind": "normal",
+            "source_key": hard_key,
+        })
 
     display_items = []
     copy_words_base = []
     copy_words_all = []
     other_groups = []
 
-    main_groups = [g for g in groups if len(g["words"]) >= 2]
+    main_groups = [g for g in groups if len(g["items"]) >= 2]
 
     for group in groups:
-        if len(group["words"]) < 2:
+        if len(group["items"]) < 2:
             other_groups.append({
                 "hard_key": group["hard_key"],
-                "words": group["words"],
+                "items": group["items"],
                 "attached_to": None,
                 "color_type": None,
             })
 
     # 「その他」候補のうち、主要分類に対して中間の「う」を1つ消すと一致するものは赤、
     # 2つ消すと一致するものは紫として、その分類内に入れる。
+    # ただし表示位置は分類の最後にまとめず、通常単語と同じ並びの中に混ぜる。
     attachments = {g["hard_key"]: [] for g in main_groups}
-    remaining_other_words = []
+    remaining_other_items = []
 
     for other in other_groups:
 
@@ -657,48 +664,66 @@ def make_grouped_lines(entries):
 
         if best_target is not None:
             color_type = "red" if best_dist == 1 else "purple"
-            for word in other["words"]:
+            for item in other["items"]:
                 attachments[best_target].append({
-                    "word": word,
+                    "word": item["word"],
+                    "red_len": item.get("red_len", 0),
                     "source_key": src_key,
-                    "color_type": color_type,
+                    "kind": color_type,
                 })
         else:
-            remaining_other_words.extend(other["words"])
+            remaining_other_items.extend(other["items"])
 
     # 2語以上ある分類だけ先に表示
     for group in groups:
 
         hard_key = group["hard_key"]
-        words = group["words"]
+        items = group["items"]
 
-        if len(words) >= 2:
+        if len(items) >= 2:
 
             attached = attachments.get(hard_key, [])
-            attached_words = [x["word"] for x in attached]
+            combined = []
+            for item in items:
+                combined.append({
+                    "word": item["word"],
+                    "red_len": item.get("red_len", 0),
+                    "kind": "normal",
+                    "source_key": hard_key,
+                })
+            combined.extend(attached)
+
+            # 普通の結果一覧に自然に混ざるよう、読み長さ順で並べる。
+            # 同じ長さなら通常→赤→紫の順にして、元の見え方をなるべく保つ。
+            kind_order = {"normal": 0, "red": 1, "purple": 2}
+            combined.sort(key=lambda x: (x.get("red_len", 0), kind_order.get(x.get("kind"), 9), x.get("word", "")))
+
+            base_words = [x["word"] for x in combined if x.get("kind") == "normal"]
+            all_words = [x["word"] for x in combined]
 
             display_items.append({
                 "type": "tag",
                 "text": f"ー{hard_key}ー",
-                "copy_text_base": "\n".join(words),
-                "copy_text_all": "\n".join(words + attached_words),
+                "copy_text_base": "\n".join(base_words),
+                "copy_text_all": "\n".join(all_words),
             })
 
-            for word in words:
-                display_items.append({
-                    "type": "word",
-                    "text": word
-                })
-                copy_words_base.append(word)
-                copy_words_all.append(word)
+            for item in combined:
+                if item.get("kind") == "red":
+                    item_type = "word_red"
+                elif item.get("kind") == "purple":
+                    item_type = "word_purple"
+                else:
+                    item_type = "word"
 
-            for item in attached:
-                item_type = "word_red" if item["color_type"] == "red" else "word_purple"
                 display_items.append({
                     "type": item_type,
                     "text": item["word"],
-                    "source_key": item["source_key"],
+                    "source_key": item.get("source_key", ""),
                 })
+
+                if item.get("kind") == "normal":
+                    copy_words_base.append(item["word"])
                 copy_words_all.append(item["word"])
 
             # グループ間だけ空ける
@@ -708,7 +733,10 @@ def make_grouped_lines(entries):
             })
 
     # 残った1語だけの分類は最後に「その他」としてまとめる
-    if remaining_other_words:
+    if remaining_other_items:
+        remaining_other_items.sort(key=lambda x: (x.get("red_len", 0), x.get("word", "")))
+        remaining_other_words = [x["word"] for x in remaining_other_items]
+
         display_items.append({
             "type": "tag",
             "text": "ーその他ー",
@@ -890,10 +918,10 @@ def render_flying_words_background():
         + '.stApp header,.stApp [data-testid="stToolbar"],.stApp [data-testid="stDecoration"],.stApp [data-testid="stStatusWidget"],.stApp [data-testid="stAppViewContainer"]{position:relative;z-index:1;}'
         + '.stApp [data-testid="stAppViewContainer"]{background:transparent;}'
         + '.stApp .block-container{position:relative;z-index:2;}'
-        + '.fly-word{position:absolute;display:inline-block;color:rgba(80,80,80,.42);font-weight:900;letter-spacing:.05em;white-space:nowrap;text-shadow:0 1px 10px rgba(0,0,0,.12);user-select:none;opacity:0;transform:translate(0,0) rotate(var(--start-rot));animation:flyWord 40s linear infinite;will-change:transform,opacity;}'
+        + '.fly-word{position:absolute;display:inline-block;color:rgba(80,80,80,.30);font-weight:900;letter-spacing:.05em;white-space:nowrap;text-shadow:0 1px 10px rgba(0,0,0,.12);user-select:none;opacity:0;transform:translate(0,0) rotate(var(--start-rot));animation:flyWord 40s linear infinite;will-change:transform,opacity;}'
         + ''.join(css_parts)
-        + '@keyframes flyWord{0%{opacity:0;transform:translate(0,0) rotate(var(--start-rot));}2%{opacity:.50;}10%{opacity:.42;}18%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}}'
-        + '@media (max-width:640px){.fly-word{color:rgba(80,80,80,.36);max-width:90vw;}}'
+        + '@keyframes flyWord{0%{opacity:0;transform:translate(0,0) rotate(var(--start-rot));}2%{opacity:.36;}10%{opacity:.28;}18%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}}'
+        + '@media (max-width:640px){.fly-word{color:rgba(80,80,80,.25);max-width:90vw;}}'
         + '</style>'
     )
 
