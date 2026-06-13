@@ -640,9 +640,13 @@ def bud_dic(rl, us12):
             if vowel not in new_dict:
                 new_dict[vowel] = []
 
+            # 分類タグは「羅列を消す」がONでも、
+            # 羅列を消す前の母音配列で分ける。
+            # 例：検索キー「おあえお」に対して、
+            # 「おあおあえお」などの元配列も分類タグとして表示できるようにする。
             hard_vowel = ext_old_katame_group_f_red(
                 red,
-                us12
+                False
             )
 
             new_dict[vowel].append(
