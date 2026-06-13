@@ -79,10 +79,11 @@ def knf(text):
 # お段+う、え段+い を短縮
 # ===========================
 
-def st0(word):
+def st0(word, remove_sokuon=True):
 
-    word = word.replace("っ", "")
-    word = word.replace("ッ", "")
+    if remove_sokuon:
+        word = word.replace("っ", "")
+        word = word.replace("ッ", "")
 
     word = word.replace("ょう", "ょ")
     word = word.replace("ョウ", "ョ")
@@ -321,80 +322,59 @@ def prp_wd(word):
 
     return red
 
-def cmp_dup_vw(seq):
-
-    # 連続区間解析
-    runs = []
-
-    i = 0
-
-    while i < len(seq):
-
-        j = i + 1
-
-        while (
-            j < len(seq)
-            and seq[j] == seq[i]
-        ):
-            j += 1
-
-        length = j - i
-
-        # ばりかた用：同一母音が3文字以上連なっている場合だけ、
-        # 2文字になるまで先頭側から削る。2連続はそのまま残す。
-        if length >= 3:
-            target = 2
-        else:
-            target = length
-
-        runs.append([
-            seq[i],
-            length,
-            target,
-        ])
-
-        i = j
-
-    # 先頭側から1文字ずつ削る
-    while True:
-
-        cgd = False
-
-        for run in runs:
-
-            char, length, target = run
-
-            if length > target:
-
-                cdd_len = (
-                    sum(r[1] for r in runs)
-                    - 1
-                )
-
-                if cdd_len < 4:
-                    return (
-                        list(
-                            "".join(
-                                c * l
-                                for c, l, _ in runs
-                            )
-                        ),
-                        True
-                    )
-
-                run[1] -= 1
-                cgd = True
-                break
-
-        if not cgd:
-            break
+def repl_non_vw_with_prev_vw(seq):
 
     result = []
+    prev_vowel = None
 
-    for char, length, _ in runs:
-        result.extend([char] * length)
+    for x in seq:
 
-    return result, False
+        if x in ["あ", "い", "う", "え", "お"]:
+            result.append(x)
+            prev_vowel = x
+        else:
+            # ばりかた用：母音以外は削除せず、直前の母音に変える。
+            # ただし、直前に母音がない場合は無視する。
+            if prev_vowel is not None:
+                result.append(prev_vowel)
+
+    return result
+
+
+def cmp_dup_vw(seq):
+
+    # ばりかた用：同一母音が3文字以上連なっている場合だけ、
+    # 3文字になるまで先頭側から1文字ずつ削る。
+    # 2連続・3連続はそのまま残す。
+    while True:
+
+        changed = False
+        i = 0
+
+        while i < len(seq):
+
+            j = i + 1
+
+            while j < len(seq) and seq[j] == seq[i]:
+                j += 1
+
+            run_len = j - i
+
+            if run_len >= 4:
+
+                candidate = seq[:i] + seq[i + 1:]
+
+                if len(candidate) < 4:
+                    return seq, True
+
+                seq = candidate
+                changed = True
+                break
+
+            i = j
+
+        if not changed:
+            return seq, False
 
 def ext_f_red(
     red,
@@ -402,13 +382,16 @@ def ext_f_red(
     us12=True
 ):
 
-    word = st0(red)
+    word = st0(red, remove_sokuon=(rl != 0))
 
     seq = st1(word)
 
     if rl == 0:
 
+        seq = repl_non_vw_with_prev_vw(seq)
         seq, stop = cmp_dup_vw(seq)
+
+        return "".join(seq)
 
     else:
 
@@ -567,6 +550,54 @@ def has_same_hard_group(entries):
     return any(v >= 2 for v in counts.values())
 
 
+def middle_u_remove_distance(source_key, target_key, max_remove=2):
+
+    if not source_key or not target_key:
+        return None
+
+    if source_key == target_key:
+        return 0
+
+    best = None
+
+    def dfs(chars, removed):
+        nonlocal best
+
+        current = "".join(chars)
+
+        if current == target_key:
+            if best is None or removed < best:
+                best = removed
+            return
+
+        if removed >= max_remove:
+            return
+
+        if best is not None and removed >= best:
+            return
+
+        # targetより短くなったら成立しない
+        if len(chars) <= len(target_key):
+            return
+
+        for i, ch in enumerate(chars):
+            # 「中間のう」だけ削除候補にする
+            if ch != "う":
+                continue
+            if i == 0 or i == len(chars) - 1:
+                continue
+
+            nxt = chars[:i] + chars[i + 1:]
+            dfs(nxt, removed + 1)
+
+    dfs(list(source_key), 0)
+
+    if best in (1, 2):
+        return best
+
+    return None
+
+
 def make_grouped_lines(entries):
 
     groups = []
@@ -587,8 +618,50 @@ def make_grouped_lines(entries):
         groups[index[hard_key]]["words"].append(word)
 
     display_items = []
-    copy_words = []
-    other_words = []
+    copy_words_base = []
+    copy_words_all = []
+    other_groups = []
+
+    main_groups = [g for g in groups if len(g["words"]) >= 2]
+
+    for group in groups:
+        if len(group["words"]) < 2:
+            other_groups.append({
+                "hard_key": group["hard_key"],
+                "words": group["words"],
+                "attached_to": None,
+                "color_type": None,
+            })
+
+    # 「その他」候補のうち、主要分類に対して中間の「う」を1つ消すと一致するものは赤、
+    # 2つ消すと一致するものは紫として、その分類内に入れる。
+    attachments = {g["hard_key"]: [] for g in main_groups}
+    remaining_other_words = []
+
+    for other in other_groups:
+
+        src_key = other["hard_key"]
+        best_target = None
+        best_dist = None
+
+        for main in main_groups:
+            dist = middle_u_remove_distance(src_key, main["hard_key"], 2)
+            if dist is None:
+                continue
+            if best_dist is None or dist < best_dist:
+                best_dist = dist
+                best_target = main["hard_key"]
+
+        if best_target is not None:
+            color_type = "red" if best_dist == 1 else "purple"
+            for word in other["words"]:
+                attachments[best_target].append({
+                    "word": word,
+                    "source_key": src_key,
+                    "color_type": color_type,
+                })
+        else:
+            remaining_other_words.extend(other["words"])
 
     # 2語以上ある分類だけ先に表示
     for group in groups:
@@ -597,9 +670,15 @@ def make_grouped_lines(entries):
         words = group["words"]
 
         if len(words) >= 2:
+
+            attached = attachments.get(hard_key, [])
+            attached_words = [x["word"] for x in attached]
+
             display_items.append({
                 "type": "tag",
-                "text": f"ー{hard_key}ー"
+                "text": f"ー{hard_key}ー",
+                "copy_text_base": "\n".join(words),
+                "copy_text_all": "\n".join(words + attached_words),
             })
 
             for word in words:
@@ -607,7 +686,17 @@ def make_grouped_lines(entries):
                     "type": "word",
                     "text": word
                 })
-                copy_words.append(word)
+                copy_words_base.append(word)
+                copy_words_all.append(word)
+
+            for item in attached:
+                item_type = "word_red" if item["color_type"] == "red" else "word_purple"
+                display_items.append({
+                    "type": item_type,
+                    "text": item["word"],
+                    "source_key": item["source_key"],
+                })
+                copy_words_all.append(item["word"])
 
             # グループ間だけ空ける
             display_items.append({
@@ -615,31 +704,31 @@ def make_grouped_lines(entries):
                 "text": ""
             })
 
-        else:
-            other_words.extend(words)
-
-    # 1語だけの分類は最後に「その他」としてまとめる
-    if other_words:
+    # 残った1語だけの分類は最後に「その他」としてまとめる
+    if remaining_other_words:
         display_items.append({
             "type": "tag",
-            "text": "ーその他ー"
+            "text": "ーその他ー",
+            "copy_text_base": "\n".join(remaining_other_words),
+            "copy_text_all": "\n".join(remaining_other_words),
         })
 
-        for word in other_words:
+        for word in remaining_other_words:
             display_items.append({
                 "type": "word",
                 "text": word
             })
-            copy_words.append(word)
+            copy_words_base.append(word)
+            copy_words_all.append(word)
 
     if display_items and display_items[-1]["type"] == "blank":
         display_items.pop()
 
-    return display_items, "\n".join(copy_words)
+    return display_items, "\n".join(copy_words_base), "\n".join(copy_words_all)
 
 def render_grouped_result(entries):
 
-    display_items, copy_text = make_grouped_lines(entries)
+    display_items, copy_text_base, copy_text_all = make_grouped_lines(entries)
 
     body_parts = []
 
@@ -648,19 +737,33 @@ def render_grouped_result(entries):
         text = html.escape(item["text"])
 
         if item["type"] == "tag":
-            body_parts.append(f'<div class="tag">{text}</div>')
+            tag_copy_base_json = json.dumps(item.get("copy_text_base", ""), ensure_ascii=False)
+            tag_copy_all_json = json.dumps(item.get("copy_text_all", ""), ensure_ascii=False)
+            body_parts.append(
+                f'<div class="tag-row"><span class="tag">{text}</span>'
+                f"<button class=\"tag-copy-btn\" onclick=\"const b=this.closest('.result-box'); const inc=b.querySelector('.include-colored')?.checked; navigator.clipboard.writeText(inc ? {tag_copy_all_json} : {tag_copy_base_json}); this.innerText='コピー済み'; setTimeout(() => this.innerText='コピー', 1200);\">コピー</button>"
+                f'</div>'
+            )
         elif item["type"] == "blank":
             body_parts.append('<div class="blank"></div>')
+        elif item["type"] == "word_red":
+            title = html.escape(item.get("source_key", ""))
+            body_parts.append(f'<div class="word word-red" title="{title}">{text}</div>')
+        elif item["type"] == "word_purple":
+            title = html.escape(item.get("source_key", ""))
+            body_parts.append(f'<div class="word word-purple" title="{title}">{text}</div>')
         else:
             body_parts.append(f'<div class="word">{text}</div>')
 
     # 余計なインデントや改行が表示に混ざらないように、HTMLは詰めて作る
     body_html = "".join(body_parts)
-    copy_json = json.dumps(copy_text, ensure_ascii=False)
+    copy_base_json = json.dumps(copy_text_base, ensure_ascii=False)
+    copy_all_json = json.dumps(copy_text_all, ensure_ascii=False)
 
     box_html = (
         '<div class="result-box">'
-        f'<button class="copy-btn" onclick=\'navigator.clipboard.writeText({copy_json}); this.innerText="コピー済み"; setTimeout(() => this.innerText="コピー", 1200);\'>コピー</button>'
+        '<label class="copy-option"><input type="checkbox" class="include-colored"> 赤・紫もコピー</label>'
+        f'<button class="copy-btn" onclick=\'const b=this.closest(".result-box"); const inc=b.querySelector(".include-colored")?.checked; navigator.clipboard.writeText(inc ? {copy_all_json} : {copy_base_json}); this.innerText="コピー済み"; setTimeout(() => this.innerText="コピー", 1200);\'>コピー</button>'
         f'<div class="result-body">{body_html}</div>'
         '</div>'
         '<style>'
@@ -668,13 +771,15 @@ def render_grouped_result(entries):
         'position:relative;'
         'border:1px solid rgba(49,51,63,.2);'
         'border-radius:.5rem;'
-        'padding:.55rem 1rem .8rem 1rem;'
+        'padding:2rem 1rem .8rem 1rem;'
         'background:rgb(250,250,250);'
         'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;'
         'font-size:.95rem;'
         'line-height:1.25;'
         'white-space:normal;'
         '}'
+        '.copy-option{position:absolute;top:.38rem;left:.55rem;font-size:.78rem;line-height:1.2;color:#444;display:flex;align-items:center;gap:.25rem;}'
+        '.copy-option input{margin:0;}'
         '.copy-btn{'
         'position:absolute;'
         'top:.35rem;'
@@ -689,14 +794,20 @@ def render_grouped_result(entries):
         '}'
         '.copy-btn:hover{background:rgb(240,242,246);}'
         '.result-body{margin:0;padding:0;}'
+        '.tag-row{display:flex;align-items:center;gap:.45rem;margin:0;padding:0;line-height:1.35;}'
         '.tag{color:#7CFC00;font-weight:700;margin:0;padding:0;line-height:1.35;}'
+        '.tag-copy-btn{border:1px solid rgba(49,51,63,.25);border-radius:.32rem;background:white;padding:.08rem .42rem;cursor:pointer;font-size:.72rem;line-height:1.15;}'
+        '.tag-copy-btn:hover{background:rgb(240,242,246);}'
         '.word{color:#111;margin:0;padding:0;line-height:1.35;}'
+        '.word-red{color:#d90000;font-weight:700;}'
+        '.word-purple{color:#8a2be2;font-weight:700;}'
         '.blank{height:.75rem;margin:0;padding:0;}'
         '</style>'
     )
 
-    height = max(120, min(10000, 40 + len(display_items) * 22))
+    height = max(120, min(10000, 65 + len(display_items) * 22))
     components.html(box_html, height=height, scrolling=False)
+
 
 
 # ===========================
@@ -725,35 +836,44 @@ def ld_bg_words():
 def render_flying_words_background():
     words = ld_bg_words()
 
-    directions = [
-        ("120vw", "0vh"),
-        ("-120vw", "0vh"),
-        ("0vw", "120vh"),
-        ("0vw", "-120vh"),
-        ("90vw", "90vh"),
-        ("-90vw", "90vh"),
-        ("90vw", "-90vh"),
-        ("-90vw", "-90vh"),
-    ]
-
     spans = []
     css_parts = []
 
-    # 2秒ごとに1つ出続けるよう、40秒周期に対して20個をずらして回す
-    # 以前は12個だけだったため、最後の単語が出たあと次の周期まで空白時間ができていた。
-    for i in range(20):
+    # 1秒ごとに1つ出続けるよう、40秒周期に対して40個をずらして回す。
+    # 出現位置は画面端に固定し、そこからランダムな一方向へ飛ばす。
+    for i in range(40):
         word = html.escape(random.choice(words))
-        x = random.randint(0, 92)
-        y = random.randint(8, 88)
-        dx, dy = random.choice(directions)
+        side = random.choice(["left", "right", "top", "bottom"])
+
+        if side == "left":
+            x = -12
+            y = random.randint(4, 92)
+            dx = random.randint(105, 145)
+            dy = random.randint(-35, 35)
+        elif side == "right":
+            x = 105
+            y = random.randint(4, 92)
+            dx = -random.randint(105, 145)
+            dy = random.randint(-35, 35)
+        elif side == "top":
+            x = random.randint(0, 92)
+            y = -10
+            dx = random.randint(-35, 35)
+            dy = random.randint(105, 145)
+        else:
+            x = random.randint(0, 92)
+            y = 105
+            dx = random.randint(-35, 35)
+            dy = -random.randint(105, 145)
+
         start_rot = random.randint(-35, 35)
         end_rot = start_rot + random.choice([-1, 1]) * random.randint(220, 520)
         size = random.uniform(1.4, 3.2)
-        delay = i * 2
+        delay = i
 
         spans.append(f'<span class="fly-word fly-word-{i}">{word}</span>')
         css_parts.append(
-            f'.fly-word-{i}{{left:{x}vw;top:{y}vh;font-size:clamp(1.1rem,{size:.2f}vw,3.2rem);animation-delay:{delay}s;--dx:{dx};--dy:{dy};--start-rot:{start_rot}deg;--end-rot:{end_rot}deg;}}'
+            f'.fly-word-{i}{{left:{x}vw;top:{y}vh;font-size:clamp(1.1rem,{size:.2f}vw,3.2rem);animation-delay:{delay}s;--dx:{dx}vw;--dy:{dy}vh;--start-rot:{start_rot}deg;--end-rot:{end_rot}deg;}}'
         )
 
     # st.markdown だと環境によって <style> 内の @keyframes が本文として表示されることがあるため、
@@ -767,10 +887,10 @@ def render_flying_words_background():
         + '.stApp header,.stApp [data-testid="stToolbar"],.stApp [data-testid="stDecoration"],.stApp [data-testid="stStatusWidget"],.stApp [data-testid="stAppViewContainer"]{position:relative;z-index:1;}'
         + '.stApp [data-testid="stAppViewContainer"]{background:transparent;}'
         + '.stApp .block-container{position:relative;z-index:2;}'
-        + '.fly-word{position:absolute;display:inline-block;color:rgba(20,120,80,.30);font-weight:900;letter-spacing:.05em;white-space:nowrap;text-shadow:0 1px 10px rgba(0,0,0,.14);user-select:none;opacity:0;transform:translate(0,0) rotate(var(--start-rot));animation:flyWord 40s linear infinite;will-change:transform,opacity;}'
+        + '.fly-word{position:absolute;display:inline-block;color:rgba(80,80,80,.42);font-weight:900;letter-spacing:.05em;white-space:nowrap;text-shadow:0 1px 10px rgba(0,0,0,.12);user-select:none;opacity:0;transform:translate(0,0) rotate(var(--start-rot));animation:flyWord 40s linear infinite;will-change:transform,opacity;}'
         + ''.join(css_parts)
-        + '@keyframes flyWord{0%{opacity:0;transform:translate(0,0) rotate(var(--start-rot));}2%{opacity:.34;}8%{opacity:.28;}15%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}}'
-        + '@media (max-width:640px){.fly-word{color:rgba(20,120,80,.24);max-width:90vw;}}'
+        + '@keyframes flyWord{0%{opacity:0;transform:translate(0,0) rotate(var(--start-rot));}2%{opacity:.50;}10%{opacity:.42;}18%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}}'
+        + '@media (max-width:640px){.fly-word{color:rgba(80,80,80,.36);max-width:90vw;}}'
         + '</style>'
     )
 
@@ -778,6 +898,7 @@ def render_flying_words_background():
         st.html(bg_html)
     else:
         st.markdown(bg_html, unsafe_allow_html=True)
+
 
 # ===========================
 # 母音フラッシュカード用
@@ -824,7 +945,7 @@ def get_flash_candidates(vowel_dict, len_label):
 
 def make_flash_answer_html(entries, output_mode, answer_key):
 
-    display_items, copy_text = make_grouped_lines(entries)
+    display_items, copy_text_base, copy_text_all = make_grouped_lines(entries)
 
     body_parts = []
 
@@ -838,21 +959,36 @@ def make_flash_answer_html(entries, output_mode, answer_key):
         text = html.escape(item["text"])
 
         if item["type"] == "tag":
-            body_parts.append(f'<div class="flash-tag">{text}</div>')
+            tag_copy_base_json = json.dumps(item.get("copy_text_base", ""), ensure_ascii=False)
+            tag_copy_all_json = json.dumps(item.get("copy_text_all", ""), ensure_ascii=False)
+            body_parts.append(
+                f'<div class="flash-tag-row"><span class="flash-tag">{text}</span>'
+                f"<button class=\"flash-tag-copy-btn\" onclick=\"const b=this.closest('.flash-answer-box'); const inc=b.querySelector('.flash-include-colored')?.checked; navigator.clipboard.writeText(inc ? {tag_copy_all_json} : {tag_copy_base_json}); this.innerText='コピー済み'; setTimeout(() => this.innerText='コピー', 1200);\">コピー</button>"
+                f'</div>'
+            )
         elif item["type"] == "blank":
             body_parts.append('<div class="flash-blank"></div>')
+        elif item["type"] == "word_red":
+            title = html.escape(item.get("source_key", ""))
+            body_parts.append(f'<div class="flash-word flash-word-red" title="{title}">{text}</div>')
+        elif item["type"] == "word_purple":
+            title = html.escape(item.get("source_key", ""))
+            body_parts.append(f'<div class="flash-word flash-word-purple" title="{title}">{text}</div>')
         else:
             body_parts.append(f'<div class="flash-word">{text}</div>')
 
     body_html = "".join(body_parts)
-    copy_json = json.dumps(copy_text, ensure_ascii=False)
+    copy_base_json = json.dumps(copy_text_base, ensure_ascii=False)
+    copy_all_json = json.dumps(copy_text_all, ensure_ascii=False)
 
     return (
         '<div class="flash-answer-box">'
-        f'<button class="flash-copy-btn" onclick=\'navigator.clipboard.writeText({copy_json}); this.innerText="コピー済み"; setTimeout(() => this.innerText="コピー", 1200);\'>コピー</button>'
+        '<label class="flash-copy-option"><input type="checkbox" class="flash-include-colored"> 赤・紫もコピー</label>'
+        f'<button class="flash-copy-btn" onclick=\'const b=this.closest(".flash-answer-box"); const inc=b.querySelector(".flash-include-colored")?.checked; navigator.clipboard.writeText(inc ? {copy_all_json} : {copy_base_json}); this.innerText="コピー済み"; setTimeout(() => this.innerText="コピー", 1200);\'>コピー</button>'
         f'<div class="flash-answer-body">{body_html}</div>'
         '</div>'
     )
+
 
 
 def render_flash_html(
@@ -952,7 +1088,7 @@ def render_flash_html(
     .flash-answer-box{{
         position:relative;
         margin-top:.8rem;
-        padding:.75rem 1rem .85rem 1rem;
+        padding:2rem 1rem .85rem 1rem;
         border:3px solid #ff315f;
         border-radius:10px;
         background:rgba(255,255,255,.94);
@@ -963,6 +1099,18 @@ def render_flash_html(
         color:#111;
         box-sizing:border-box;
     }}
+    .flash-copy-option{{
+        position:absolute;
+        top:.38rem;
+        left:.55rem;
+        font-size:.78rem;
+        line-height:1.2;
+        color:#444;
+        display:flex;
+        align-items:center;
+        gap:.25rem;
+    }}
+    .flash-copy-option input{{margin:0;}}
     .flash-copy-btn{{
         position:absolute;
         top:.35rem;
@@ -985,8 +1133,13 @@ def render_flash_html(
         color:#ff315f;
         line-height:1.35;
     }}
+    .flash-tag-row{{display:flex;align-items:center;gap:.45rem;margin:0;padding:0;line-height:1.35;}}
     .flash-tag{{color:#7CFC00;font-weight:800;margin:0;padding:0;line-height:1.35;}}
+    .flash-tag-copy-btn{{border:1px solid rgba(49,51,63,.25);border-radius:.32rem;background:white;padding:.08rem .42rem;cursor:pointer;font-size:.72rem;line-height:1.15;}}
+    .flash-tag-copy-btn:hover{{background:rgb(240,242,246);}}
     .flash-word{{color:#111;margin:0;padding:0;line-height:1.35;}}
+    .flash-word-red{{color:#d90000;font-weight:800;}}
+    .flash-word-purple{{color:#8a2be2;font-weight:800;}}
     .flash-blank{{height:.75rem;margin:0;padding:0;}}
     @keyframes slideOutRight{{
         from{{transform:translateX(0);opacity:1;}}
