@@ -1858,7 +1858,21 @@ if qu:
             rl
         )
     else:
-        key = ext_vw_sch(qu)
+        # 母音で検索でも、単語検索と同じく
+        # 「最終キー」と「羅列削除前キー」を作る。
+        # 例：やわめで おあおあえお を入れた場合、
+        # 最終キーは おあえお、羅列削除前キーは おあおあえお。
+        # これにより ーおあいえおー は出さず、
+        # ーおあおあいえうおー のように同じ羅列削除前キーへ来るものは出す。
+        key = ext(
+            qu,
+            rl,
+            us12
+        )
+        query_pre_rep = ext_pre_rep(
+            qu,
+            rl
+        )
 
     res = collect_search_results(vw_dic, key, query_pre_rep)
 
