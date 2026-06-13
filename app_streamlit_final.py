@@ -662,6 +662,39 @@ def bud_dic(rl, us12):
 
 
 
+def collect_search_results(vowel_dict, key):
+
+    # 「羅列を消す」は辞書側では常時ONにする。
+    # ただし検索語側では羅列を消さず、
+    # 1) 圧縮後キーが検索キーに一致するもの
+    # 2) 分類タグ用の元配列が検索キーに一致するもの
+    # を返す。
+    # これにより、例：
+    #   おあえお     → おあえお / おあおあえお なども出る
+    #   おあおあえお → おあえお は出ない
+
+    results = []
+    seen_words = set()
+
+    for item in vowel_dict.get(key, []):
+        word = item[0]
+        if word not in seen_words:
+            results.append(item)
+            seen_words.add(word)
+
+    for entries in vowel_dict.values():
+        for item in entries:
+            word = item[0]
+            hard_key = item[2] if len(item) >= 3 else ""
+            if hard_key == key and word not in seen_words:
+                results.append(item)
+                seen_words.add(word)
+
+    results.sort(key=lambda x: x[1])
+
+    return results
+
+
 # ===========================
 # 表示用
 # ===========================
@@ -1477,14 +1510,9 @@ def render_flashcard_section():
 
         flash_rl = flash_rl_nm[flash_rl_lb]
 
-        if flash_rl == 0:
-            flash_us12 = False
-        else:
-            flash_us12 = st.checkbox(
-                "羅列を消す",
-                value=True,
-                key="flash_us12"
-            )
+        # 羅列削除はシステムとして常時ON。
+        # 画面上のチェックボックスは表示しない。
+        flash_us12 = True
 
         output_mode = st.radio(
             "出力方法",
@@ -1663,13 +1691,9 @@ rl_lb = st.radio(
 
 rl = rl_nm[rl_lb]
 
-if rl == 0:
-    us12 = False
-else:
-    us12 = st.checkbox(
-        "羅列を消す",
-        value=True
-    )
+# 羅列削除はシステムとして常時ON。
+# 画面上のチェックボックスは表示しない。
+us12 = True
 
 rl = rl_nm[rl_lb]
 sch_md = st.radio(
@@ -1700,15 +1724,18 @@ qu = st.text_input("検索語")
 if qu:
 
     if sch_md == "単語で検索":
+        # 検索語側では「羅列を消す」をかけない。
+        # 辞書側は常時ONなので、短いキーでは羅列削除された語も拾い、
+        # 長いキーではその元配列に一致する語だけ拾う。
         key = ext(
             qu,
             rl,
-            us12
+            False
         )
     else:
         key = ext_vw_sch(qu)
 
-    res = vw_dic.get(key, [])
+    res = collect_search_results(vw_dic, key)
 
     st.write("検索キー:", key)
     st.write("一致件数:", len(res))
