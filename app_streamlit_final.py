@@ -496,6 +496,44 @@ def ext_old_katame_group_f_red(red, us12=True):
     return "".join(vowels)
 
 
+def ext_group_key_f_red(red, rl=2):
+
+    # 分類タグ・長い形での検索用キー。
+    # 最終的に検索辞書へ登録するキーとは分ける。
+    #
+    # 重要：ここでは「羅列削除」だけでなく、
+    # ふつう/やわめの中間「う」「い」削除も行わない。
+    # そのため、
+    #   あおあおあう
+    #   あおあおあいう
+    #   あおうあおあう
+    # のようなものは、ルール適用後に近い形になっても、
+    # それぞれ別の分類タグとして残る。
+
+    if rl == 0:
+        return ext_f_red(red, 0, True)
+
+    if rl == 1:
+        return ext_f_red(red, 1, True)
+
+    word = st0(red, remove_sokuon=True)
+    seq = st1(word)
+
+    seq, stop = rem_dup(seq)
+    if stop:
+        return "".join(rem_no_vw(seq))
+
+    vowels = rem_no_vw(seq)
+
+    vowels, stop = rem_dup(vowels)
+    if stop:
+        return "".join(vowels)
+
+    # ここで止める。
+    # 中間う/い削除、最後の重複削除、羅列削除はしない。
+    return "".join(vowels)
+
+
 def ext_f_red(
     red,
     rl=2,
@@ -642,15 +680,13 @@ def bud_dic(rl, us12):
                 new_dict[vowel] = []
 
             # 分類タグ・長い形での検索用キー。
-            # ここでは「い」「う」削除など、各ルール本来の処理はそのまま行い、
-            # 最後の羅列削除だけを行わない。
-            # 例：やわめで「おあおあいえうお」系の単語は、
-            # 中間の「い」「う」は通常どおり処理されたうえで、
-            # 羅列削除前の形でも拾えるようにする。
-            hard_vowel = ext_f_red(
+            # 検索辞書側の最終キーは羅列削除まで行うが、
+            # 分類タグは「中間う/い削除」と「羅列削除」の前の形で保持する。
+            # これにより、い/うを消した結果として同じ形になる単語は、
+            # 無理に同じ分類タグへ入らず、別タグとして残る。
+            hard_vowel = ext_group_key_f_red(
                 red,
-                rl,
-                False
+                rl
             )
 
             new_dict[vowel].append(
@@ -670,12 +706,15 @@ def collect_search_results(vowel_dict, key):
 
     # 「羅列を消す」は辞書側では常時ONにする。
     # ただし検索語側では羅列を消さず、
-    # 1) 圧縮後キーが検索キーに一致するもの
-    # 2) 分類タグ用の元配列が検索キーに一致するもの
+    # 1) 最終キーが検索キーに一致するもの
+    # 2) 分類タグ用キーが検索キーに一致するもの
     # を返す。
-    # これにより、例：
-    #   おあえお     → おあえお / おあおあえお なども出る
-    #   おあおあえお → おあえお は出ない
+    # ただし分類タグ用キーは、中間う/い削除の前の形なので、
+    # 「い」「う」を消した結果たまたま一致するだけの単語は、
+    # 長いキー検索では拾わない。
+    # 例：
+    #   おあえお     → 羅列削除で おあえお になるものも出る
+    #   おあおあう   → い/う削除で あおあう になるだけのものは出ない
 
     results = []
     seen_words = set()
