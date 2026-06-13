@@ -534,6 +534,65 @@ def ext_group_key_f_red(red, rl=2):
     return "".join(vowels)
 
 
+def ext_pre_rep_f_red(red, rl=2):
+
+    # 検索フィルタ用キー。
+    # 最終キーの直前、つまり「羅列削除」だけを行う前の状態を返す。
+    # ふつう/やわめの中間「う」「い」削除など、羅列削除以外のルールは通常どおり行う。
+    # 例：
+    #   おあおあえお       → おあおあえお → 羅列削除後は おあえお
+    #   おあおあいえうお   → おあおあえお → 羅列削除後は おあえお
+    #   おあいえお         → おあえお     → 羅列削除後も おあえお
+    # そのため、長い羅列形で検索した場合は、同じ pre_rep を持つものだけ拾える。
+
+    if rl == 0:
+        return ext_f_red(red, 0, True)
+
+    if rl == 1:
+        return ext_f_red(red, 1, True)
+
+    word = st0(red, remove_sokuon=True)
+
+    seq = st1(word)
+
+    seq, stop = rem_dup(seq)
+    if stop:
+        return "".join(rem_no_vw(seq))
+
+    vowels = rem_no_vw(seq)
+
+    vowels, stop = rem_dup(vowels)
+    if stop:
+        return "".join(vowels)
+
+    if rl >= 2:
+        vowels, stop = rem_mid_vw(vowels, "う")
+        if stop:
+            return "".join(vowels)
+
+    if rl >= 3:
+        vowels, stop = rem_mid_vw(vowels, "い")
+        if stop:
+            return "".join(vowels)
+
+    vowels, stop = rem_dup(vowels)
+    if stop:
+        return "".join(vowels)
+
+    # ここで止める。羅列削除 cmp_p_rep は行わない。
+    return "".join(vowels)
+
+
+def ext_pre_rep(word, rl=2):
+
+    red = prp_wd(word)
+
+    return ext_pre_rep_f_red(
+        red,
+        rl,
+    )
+
+
 def ext_f_red(
     red,
     rl=2,
@@ -689,8 +748,13 @@ def bud_dic(rl, us12):
                 rl
             )
 
+            pre_rep_vowel = ext_pre_rep_f_red(
+                red,
+                rl
+            )
+
             new_dict[vowel].append(
-                (word, red_len, hard_vowel)
+                (word, red_len, hard_vowel, pre_rep_vowel)
             )
 
             new_ct += 1
@@ -702,29 +766,48 @@ def bud_dic(rl, us12):
 
 
 
-def collect_search_results(vowel_dict, key):
+def collect_search_results(vowel_dict, key, query_pre_rep=None):
 
     # 検索キーに一致するものを返す。
-    # 辞書側も検索語側も通常ルールどおりに処理するため、
-    # 羅列削除・中間う/い削除などで同じキーになる単語は同じ検索結果に出る。
-    # さらに、分類タグ用キーが検索キーそのものに一致する語も補助的に拾う。
+    # 基本は「最終キー」が検索キーに一致するものを拾う。
+    # ただし検索語自体が羅列削除で短くなる場合は、
+    # 「羅列削除前キー（pre_rep）」が検索語側の pre_rep と一致するものだけに絞る。
+    #
+    # 例：やわめで「おあおあえお」を単語検索
+    #   検索語 pre_rep = おあおあえお
+    #   検索語 final   = おあえお
+    #   ーおあいえおー         は pre_rep が おあえお なので出ない
+    #   ーおあおあいえうおー   は pre_rep が おあおあえお なので出る
+
+    restrict_by_pre_rep = (
+        query_pre_rep is not None
+        and query_pre_rep != key
+    )
 
     results = []
     seen_words = set()
 
     for item in vowel_dict.get(key, []):
         word = item[0]
+        item_pre_rep = item[3] if len(item) >= 4 else ""
+
+        if restrict_by_pre_rep and item_pre_rep != query_pre_rep:
+            continue
+
         if word not in seen_words:
             results.append(item)
             seen_words.add(word)
 
-    for entries in vowel_dict.values():
-        for item in entries:
-            word = item[0]
-            hard_key = item[2] if len(item) >= 3 else ""
-            if hard_key == key and word not in seen_words:
-                results.append(item)
-                seen_words.add(word)
+    # 検索語が羅列削除で短くならない場合だけ、分類タグそのものに一致する語も補助的に拾う。
+    # 羅列形で検索したときに、検索ルールを変えて別タグを混ぜないため。
+    if not restrict_by_pre_rep:
+        for entries in vowel_dict.values():
+            for item in entries:
+                word = item[0]
+                hard_key = item[2] if len(item) >= 3 else ""
+                if hard_key == key and word not in seen_words:
+                    results.append(item)
+                    seen_words.add(word)
 
     results.sort(key=lambda x: x[1])
 
@@ -1759,20 +1842,25 @@ qu = st.text_input("検索語")
 
 if qu:
 
+    query_pre_rep = None
+
     if sch_md == "単語で検索":
         # 検索語側も通常ルールどおりに処理する。
-        # 羅列削除はシステムとして常時ONなので、
-        # 例：おあおあえお → おあえお になり、
-        # おあおあいえうお のように、通常ルールで同じキーになる単語も拾う。
+        # ただし、検索語が羅列削除で短くなる場合は、
+        # 羅列削除前の形が同じものだけを検索結果に残す。
         key = ext(
             qu,
             rl,
             us12
         )
+        query_pre_rep = ext_pre_rep(
+            qu,
+            rl
+        )
     else:
         key = ext_vw_sch(qu)
 
-    res = collect_search_results(vw_dic, key)
+    res = collect_search_results(vw_dic, key, query_pre_rep)
 
     st.write("検索キー:", key)
     st.write("一致件数:", len(res))
@@ -1811,6 +1899,7 @@ with st.expander("変換テスト"):
                 us12
             )
         )
+        st.write("羅列削除前キー:", ext_pre_rep(t, rl))
         st.write("母音検索キー:", ext_vw_sch(t))
 
 
