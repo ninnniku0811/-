@@ -592,6 +592,120 @@ def ext_pre_rep(word, rl=2):
         rl,
     )
 
+def ext_vw_rule_f_red(red, rl=2, us12=True):
+
+    # 母音検索用：お段+う、え段+いの短縮（st0）は行わない。
+    # それ以外の選択ルールは単語検索側と同じ流れで適用する。
+
+    seq = st1(red)
+
+    if rl == 0:
+        vowels = rem_no_vw(seq)
+        vowels, stop = cmp_dup_vw(vowels)
+        return "".join(vowels)
+
+    if rl == 1:
+        seq = othello_non_vowels_between_same_vowels(seq)
+        vowels = rem_no_vw(seq)
+        vowels, stop = cmp_dup_vw_old_barikata(vowels)
+        return "".join(vowels)
+
+    seq, stop = rem_dup(seq)
+    if stop:
+        return "".join(rem_no_vw(seq))
+
+    vowels = rem_no_vw(seq)
+
+    vowels, stop = rem_dup(vowels)
+    if stop:
+        return "".join(vowels)
+
+    if rl >= 2:
+        vowels, stop = rem_mid_vw(vowels, "う")
+        if stop:
+            return "".join(vowels)
+
+    if rl >= 3:
+        vowels, stop = rem_mid_vw(vowels, "い")
+        if stop:
+            return "".join(vowels)
+
+    vowels, stop = rem_dup(vowels)
+    if stop:
+        return "".join(vowels)
+
+    if us12:
+        vowels, stop = cmp_p_rep(vowels)
+
+    return "".join(vowels)
+
+
+def ext_vw_pre_rep_f_red(red, rl=2):
+
+    # 母音検索用の羅列削除前キー。
+    # st0は使わず、お段+う / え段+い は消さない。
+    # 羅列削除だけを行う前の状態を返す。
+
+    seq = st1(red)
+
+    if rl == 0:
+        vowels = rem_no_vw(seq)
+        vowels, stop = cmp_dup_vw(vowels)
+        return "".join(vowels)
+
+    if rl == 1:
+        seq = othello_non_vowels_between_same_vowels(seq)
+        vowels = rem_no_vw(seq)
+        vowels, stop = cmp_dup_vw_old_barikata(vowels)
+        return "".join(vowels)
+
+    seq, stop = rem_dup(seq)
+    if stop:
+        return "".join(rem_no_vw(seq))
+
+    vowels = rem_no_vw(seq)
+
+    vowels, stop = rem_dup(vowels)
+    if stop:
+        return "".join(vowels)
+
+    if rl >= 2:
+        vowels, stop = rem_mid_vw(vowels, "う")
+        if stop:
+            return "".join(vowels)
+
+    if rl >= 3:
+        vowels, stop = rem_mid_vw(vowels, "い")
+        if stop:
+            return "".join(vowels)
+
+    vowels, stop = rem_dup(vowels)
+    if stop:
+        return "".join(vowels)
+
+    return "".join(vowels)
+
+
+def ext_vw_rule(word, rl=2, us12=True):
+
+    red = prp_wd(word)
+
+    return ext_vw_rule_f_red(
+        red,
+        rl,
+        us12,
+    )
+
+
+def ext_vw_pre_rep(word, rl=2):
+
+    red = prp_wd(word)
+
+    return ext_vw_pre_rep_f_red(
+        red,
+        rl,
+    )
+
 
 def ext_f_red(
     red,
@@ -1858,18 +1972,14 @@ if qu:
             rl
         )
     else:
-        # 母音で検索でも、単語検索と同じく
-        # 「最終キー」と「羅列削除前キー」を作る。
-        # 例：やわめで おあおあえお を入れた場合、
-        # 最終キーは おあえお、羅列削除前キーは おあおあえお。
-        # これにより ーおあいえおー は出さず、
-        # ーおあおあいえうおー のように同じ羅列削除前キーへ来るものは出す。
-        key = ext(
+        # 母音検索では st0（お段+う、え段+いの短縮）は行わない。
+        # ただし、羅列削除前キーによる絞り込みは単語検索と同じように行う。
+        key = ext_vw_rule(
             qu,
             rl,
             us12
         )
-        query_pre_rep = ext_pre_rep(
+        query_pre_rep = ext_vw_pre_rep(
             qu,
             rl
         )
@@ -1914,7 +2024,8 @@ with st.expander("変換テスト"):
             )
         )
         st.write("羅列削除前キー:", ext_pre_rep(t, rl))
-        st.write("母音検索キー:", ext_vw_sch(t))
+        st.write("母音検索キー:", ext_vw_rule(t, rl, us12))
+        st.write("母音検索・羅列削除前キー:", ext_vw_pre_rep(t, rl))
 
 
 render_flashcard_section()
