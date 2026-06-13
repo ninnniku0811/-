@@ -14,6 +14,9 @@ st.set_page_config(page_title="母音検索システム", layout="wide")
 
 tagger = Tagger()
 
+def attr_text(text):
+    return html.escape(text or "", quote=True)
+
 def cv_num(text):
 
     def repl(m):
@@ -737,11 +740,11 @@ def render_grouped_result(entries):
         text = html.escape(item["text"])
 
         if item["type"] == "tag":
-            tag_copy_base_json = json.dumps(item.get("copy_text_base", ""), ensure_ascii=False)
-            tag_copy_all_json = json.dumps(item.get("copy_text_all", ""), ensure_ascii=False)
+            tag_copy_base_attr = attr_text(item.get("copy_text_base", ""))
+            tag_copy_all_attr = attr_text(item.get("copy_text_all", ""))
             body_parts.append(
                 f'<div class="tag-row"><span class="tag">{text}</span>'
-                f"<button class=\"tag-copy-btn\" onclick=\"const b=this.closest('.result-box'); const inc=b.querySelector('.include-colored')?.checked; navigator.clipboard.writeText(inc ? {tag_copy_all_json} : {tag_copy_base_json}); this.innerText='コピー済み'; setTimeout(() => this.innerText='コピー', 1200);\">コピー</button>"
+                f'''<button class="tag-copy-btn" data-base="{tag_copy_base_attr}" data-all="{tag_copy_all_attr}" onclick="const b=this.closest(\'.result-box\'); const inc=b.querySelector(\'.include-colored\')?.checked; navigator.clipboard.writeText(inc ? this.dataset.all : this.dataset.base); this.innerText=\'コピー済み\'; setTimeout(() => this.innerText=\'コピー\', 1200);">コピー</button>'''
                 f'</div>'
             )
         elif item["type"] == "blank":
@@ -757,13 +760,13 @@ def render_grouped_result(entries):
 
     # 余計なインデントや改行が表示に混ざらないように、HTMLは詰めて作る
     body_html = "".join(body_parts)
-    copy_base_json = json.dumps(copy_text_base, ensure_ascii=False)
-    copy_all_json = json.dumps(copy_text_all, ensure_ascii=False)
+    copy_base_attr = attr_text(copy_text_base)
+    copy_all_attr = attr_text(copy_text_all)
 
     box_html = (
         '<div class="result-box">'
         '<label class="copy-option"><input type="checkbox" class="include-colored"> 赤・紫もコピー</label>'
-        f'<button class="copy-btn" onclick=\'const b=this.closest(".result-box"); const inc=b.querySelector(".include-colored")?.checked; navigator.clipboard.writeText(inc ? {copy_all_json} : {copy_base_json}); this.innerText="コピー済み"; setTimeout(() => this.innerText="コピー", 1200);\'>コピー</button>'
+        f'''<button class="copy-btn" data-base="{copy_base_attr}" data-all="{copy_all_attr}" onclick="const b=this.closest(\'.result-box\'); const inc=b.querySelector(\'.include-colored\')?.checked; navigator.clipboard.writeText(inc ? this.dataset.all : this.dataset.base); this.innerText=\'コピー済み\'; setTimeout(() => this.innerText=\'コピー\', 1200);">コピー</button>'''
         f'<div class="result-body">{body_html}</div>'
         '</div>'
         '<style>'
@@ -959,11 +962,11 @@ def make_flash_answer_html(entries, output_mode, answer_key):
         text = html.escape(item["text"])
 
         if item["type"] == "tag":
-            tag_copy_base_json = json.dumps(item.get("copy_text_base", ""), ensure_ascii=False)
-            tag_copy_all_json = json.dumps(item.get("copy_text_all", ""), ensure_ascii=False)
+            tag_copy_base_attr = attr_text(item.get("copy_text_base", ""))
+            tag_copy_all_attr = attr_text(item.get("copy_text_all", ""))
             body_parts.append(
                 f'<div class="flash-tag-row"><span class="flash-tag">{text}</span>'
-                f"<button class=\"flash-tag-copy-btn\" onclick=\"const b=this.closest('.flash-answer-box'); const inc=b.querySelector('.flash-include-colored')?.checked; navigator.clipboard.writeText(inc ? {tag_copy_all_json} : {tag_copy_base_json}); this.innerText='コピー済み'; setTimeout(() => this.innerText='コピー', 1200);\">コピー</button>"
+                f'''<button class="flash-tag-copy-btn" data-base="{tag_copy_base_attr}" data-all="{tag_copy_all_attr}" onclick="const b=this.closest(\'.flash-answer-box\'); const inc=b.querySelector(\'.flash-include-colored\')?.checked; navigator.clipboard.writeText(inc ? this.dataset.all : this.dataset.base); this.innerText=\'コピー済み\'; setTimeout(() => this.innerText=\'コピー\', 1200);">コピー</button>'''
                 f'</div>'
             )
         elif item["type"] == "blank":
@@ -978,13 +981,13 @@ def make_flash_answer_html(entries, output_mode, answer_key):
             body_parts.append(f'<div class="flash-word">{text}</div>')
 
     body_html = "".join(body_parts)
-    copy_base_json = json.dumps(copy_text_base, ensure_ascii=False)
-    copy_all_json = json.dumps(copy_text_all, ensure_ascii=False)
+    copy_base_attr = attr_text(copy_text_base)
+    copy_all_attr = attr_text(copy_text_all)
 
     return (
         '<div class="flash-answer-box">'
         '<label class="flash-copy-option"><input type="checkbox" class="flash-include-colored"> 赤・紫もコピー</label>'
-        f'<button class="flash-copy-btn" onclick=\'const b=this.closest(".flash-answer-box"); const inc=b.querySelector(".flash-include-colored")?.checked; navigator.clipboard.writeText(inc ? {copy_all_json} : {copy_base_json}); this.innerText="コピー済み"; setTimeout(() => this.innerText="コピー", 1200);\'>コピー</button>'
+        f'''<button class="flash-copy-btn" data-base="{copy_base_attr}" data-all="{copy_all_attr}" onclick="const b=this.closest(\'.flash-answer-box\'); const inc=b.querySelector(\'.flash-include-colored\')?.checked; navigator.clipboard.writeText(inc ? this.dataset.all : this.dataset.base); this.innerText=\'コピー済み\'; setTimeout(() => this.innerText=\'コピー\', 1200);">コピー</button>'''
         f'<div class="flash-answer-body">{body_html}</div>'
         '</div>'
     )
