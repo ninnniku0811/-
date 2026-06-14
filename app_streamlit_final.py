@@ -1900,6 +1900,248 @@ def render_flashcard_section():
         with hist_col:
             render_flash_history(st.session_state.flash_card_history)
 
+
+# ===========================
+# 単語神経衰弱
+# ===========================
+
+def build_memory_cards(rl, us12=True, pair_count=6):
+
+    mem_dic, mem_ct = ld_dic(rl, us12)
+
+    candidates = []
+
+    for key, entries in mem_dic.items():
+        words = []
+        seen = set()
+        for item in entries:
+            word = item[0]
+            if word not in seen:
+                words.append(item)
+                seen.add(word)
+        if len(words) >= 2:
+            candidates.append((key, words))
+
+    if len(candidates) < pair_count:
+        return [], len(candidates), mem_ct
+
+    selected_groups = random.sample(candidates, pair_count)
+
+    cards = []
+    card_id = 0
+
+    for key, entries in selected_groups:
+        pair_items = random.sample(entries, 2)
+        for item in pair_items:
+            cards.append({
+                "id": card_id,
+                "word": item[0],
+                "key": key,
+            })
+            card_id += 1
+
+    random.shuffle(cards)
+
+    # shuffle後もインデックスで扱えるように id を振り直す
+    for i, card in enumerate(cards):
+        card["id"] = i
+
+    return cards, len(candidates), mem_ct
+
+
+def start_memory_game(rl_lb, rl, us12=True):
+
+    cards, candidate_count, mem_ct = build_memory_cards(
+        rl,
+        us12,
+        pair_count=6,
+    )
+
+    st.session_state.memory_cards = cards
+    st.session_state.memory_matched = [False] * len(cards)
+    st.session_state.memory_selected = []
+    st.session_state.memory_moves = 0
+    st.session_state.memory_found = 0
+    st.session_state.memory_rule = rl_lb
+    st.session_state.memory_candidate_count = candidate_count
+    st.session_state.memory_word_count = mem_ct
+    st.session_state.memory_message = ""
+
+
+def handle_memory_click(idx):
+
+    cards = st.session_state.get("memory_cards", [])
+    matched = st.session_state.get("memory_matched", [])
+    selected = st.session_state.get("memory_selected", [])
+
+    if not cards or idx >= len(cards):
+        return
+
+    # 前回2枚開いて外れていた場合は、次のクリックで閉じる
+    if len(selected) >= 2:
+        selected = []
+
+    if matched[idx]:
+        st.session_state.memory_selected = selected
+        return
+
+    if idx in selected:
+        st.session_state.memory_selected = selected
+        return
+
+    selected.append(idx)
+
+    if len(selected) == 2:
+        st.session_state.memory_moves = st.session_state.get("memory_moves", 0) + 1
+        a, b = selected
+        if cards[a]["key"] == cards[b]["key"]:
+            matched[a] = True
+            matched[b] = True
+            st.session_state.memory_found = st.session_state.get("memory_found", 0) + 1
+            st.session_state.memory_message = f"正解！検索キー：{cards[a]['key']}"
+            selected = []
+        else:
+            st.session_state.memory_message = "ちがいます。次のカードを押すと閉じます。"
+
+    st.session_state.memory_matched = matched
+    st.session_state.memory_selected = selected
+
+
+def render_memory_card_button(card, idx):
+
+    matched = st.session_state.get("memory_matched", [])
+    selected = st.session_state.get("memory_selected", [])
+
+    is_open = (
+        idx < len(matched)
+        and (
+            matched[idx]
+            or idx in selected
+        )
+    )
+
+    if is_open:
+        label = card["word"]
+    else:
+        label = "？"
+
+    if idx < len(matched) and matched[idx]:
+        label = "✓ " + label
+
+    st.button(
+        label,
+        key=f"memory_card_{idx}_{card.get('id', idx)}",
+        use_container_width=True,
+        on_click=handle_memory_click,
+        args=(idx,),
+        disabled=(idx < len(matched) and matched[idx]),
+    )
+
+
+def render_memory_game_section():
+
+    st.markdown("---")
+    st.subheader("単語神経衰弱")
+
+    with st.container(border=True):
+
+        st.caption("同じ検索キーになる単語ペアを6組見つけるゲームです。")
+
+        mem_rl_nm = {
+            "ばりかた": 0,
+            "かため": 1,
+            "ふつう": 2,
+            "やわめ": 3,
+        }
+
+        mem_rl_lb = st.radio(
+            "神経衰弱の変換ルール",
+            list(mem_rl_nm.keys()),
+            horizontal=True,
+            index=2,
+            key="memory_rule_select",
+        )
+
+        mem_rl = mem_rl_nm[mem_rl_lb]
+        mem_us12 = True
+
+        if "memory_cards" not in st.session_state:
+            start_memory_game(mem_rl_lb, mem_rl, mem_us12)
+
+        if st.session_state.get("memory_rule") != mem_rl_lb:
+            start_memory_game(mem_rl_lb, mem_rl, mem_us12)
+
+        top_cols = st.columns([1, 1, 1], gap="small")
+        with top_cols[0]:
+            if st.button("新しいゲーム", key="memory_new", use_container_width=True):
+                start_memory_game(mem_rl_lb, mem_rl, mem_us12)
+                st.rerun()
+        with top_cols[1]:
+            st.metric("見つけたペア", f"{st.session_state.get('memory_found', 0)} / 6")
+        with top_cols[2]:
+            st.metric("めくった回数", st.session_state.get("memory_moves", 0))
+
+        candidate_count = st.session_state.get("memory_candidate_count", 0)
+        mem_word_count = st.session_state.get("memory_word_count", 0)
+        st.caption(f"対象検索キー数: {candidate_count:,} / 登録単語数: {mem_word_count:,}")
+
+        cards = st.session_state.get("memory_cards", [])
+
+        if not cards:
+            st.warning("この条件では、ペアを6組作れる検索キーが足りません。")
+            return
+
+        msg = st.session_state.get("memory_message", "")
+        if msg:
+            if msg.startswith("正解"):
+                st.success(msg)
+            else:
+                st.info(msg)
+
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stButton"] button[kind="secondary"]{
+                min-height:3.4rem;
+                white-space:normal;
+                word-break:break-word;
+                line-height:1.15;
+                font-weight:800;
+            }
+            @media (max-width:640px){
+                div[data-testid="stButton"] button[kind="secondary"]{
+                    min-height:3rem;
+                    font-size:.9rem;
+                    padding:.35rem .25rem;
+                }
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # 12枚を3列×4段で表示。スマホでも比較的崩れにくい幅にする。
+        for row_start in range(0, len(cards), 3):
+            cols = st.columns(3, gap="small")
+            for offset, col in enumerate(cols):
+                idx = row_start + offset
+                if idx < len(cards):
+                    with col:
+                        render_memory_card_button(cards[idx], idx)
+
+        if st.session_state.get("memory_found", 0) >= 6:
+            st.balloons()
+            st.success("クリア！6ペアすべて見つけました。")
+
+        with st.expander("答えを見る"):
+            answer_groups = {}
+            for card in cards:
+                answer_groups.setdefault(card["key"], []).append(card["word"])
+
+            for key, words in answer_groups.items():
+                st.markdown(f"**{key}**")
+                st.write(" / ".join(words))
+
 # ===========================
 # GUI
 # ===========================
@@ -2029,3 +2271,4 @@ with st.expander("変換テスト"):
 
 
 render_flashcard_section()
+render_memory_game_section()
