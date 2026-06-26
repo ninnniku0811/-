@@ -1725,5 +1725,3 @@ def render_flashcard_section():
     st.subheader("母音フラッシュカード")
 
     with st.container(border=True):
-
-  ... （残り22 KB）
