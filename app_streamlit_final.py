@@ -2192,7 +2192,78 @@ vw_dic, ct = ld_dic(
     us12
 )
 
-st.caption(f"登録単語数: {ct:,}")
+length_count = {
+    "3以下": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0,
+    "7以上": 0
+}
+
+for key, words in vw_dic.items():
+
+    l = len(key)
+    c = len(words)
+
+    if l <= 3:
+        length_count["3以下"] += c
+    elif l == 4:
+        length_count["4"] += c
+    elif l == 5:
+        length_count["5"] += c
+    elif l == 6:
+        length_count["6"] += c
+    else:
+        length_count["7以上"] += c
+
+# 母音長ごとの登録単語数を集計
+length_counts = {
+    "3以下": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0,
+    "7以上": 0,
+}
+
+counted = set()
+
+for words in vw_dic.values():
+
+    for word, *_ in words:
+
+        if word in counted:
+            continue
+
+        counted.add(word)
+
+        key = ext(
+            word,
+            rl,
+            us12
+        )
+
+        l = len(key)
+
+        if l <= 3:
+            length_counts["3以下"] += 1
+        elif l == 4:
+            length_counts["4"] += 1
+        elif l == 5:
+            length_counts["5"] += 1
+        elif l == 6:
+            length_counts["6"] += 1
+        else:
+            length_counts["7以上"] += 1
+
+st.caption(
+    f"登録単語数: {ct:,} 　"
+    f"(母音の長さ "
+    f"3字以下: {length_counts['3以下']:,}　 "
+    f"4字: {length_counts['4']:,}　 "
+    f"5字: {length_counts['5']:,}　 "
+    f"6字: {length_counts['6']:,}　 "
+    f"7字以上: {length_counts['7以上']:,})"
+)
 
 qu = st.text_input("検索語")
 
@@ -2275,10 +2346,34 @@ render_memory_game_section()
 
 with st.expander("未読漢字チェック"):
 
+    if "kanji_check_running" not in st.session_state:
+        st.session_state.kanji_check_running = False
+
+    if "kanji_check_finished" not in st.session_state:
+        st.session_state.kanji_check_finished = False
+
+    if "kanji_check_result" not in st.session_state:
+        st.session_state.kanji_check_result = []
+
     if "kanji_problems" not in st.session_state:
         st.session_state.kanji_problems = []
 
     if st.button("チェック開始"):
+
+        st.session_state.kanji_check_running = True
+        st.session_state.kanji_check_finished = False
+
+        st.rerun()
+
+    if st.session_state.kanji_check_running:
+
+        st.info("チェック中...")
+
+    if (
+        st.session_state.kanji_check_running
+        and
+        not st.session_state.kanji_check_finished
+    ):
 
         import re
 
@@ -2317,11 +2412,24 @@ with st.expander("未読漢字チェック"):
 
         st.session_state.kanji_problems = problems
 
+        st.session_state.kanji_check_running = False
+        st.session_state.kanji_check_finished = True
+
+        st.rerun()
+
     problems = st.session_state.kanji_problems
 
-    st.write(f"件数: {len(problems)}")
+    if st.session_state.kanji_check_running:
+        st.info("チェック中...")
 
-    if problems:
+    elif st.session_state.kanji_check_finished:
+        st.success("チェック終了")
+
+    if st.session_state.kanji_check_finished:
+
+        problems = st.session_state.kanji_check_result
+
+        st.write(f"件数: {len(problems)}")
 
         text = "\n".join(
             f"{w} → {r} [{k}]"
@@ -2369,7 +2477,31 @@ with st.expander("未読漢字チェック"):
 
 with st.expander("同一かなチェック"):
 
+    if "samekana_check_running" not in st.session_state:
+        st.session_state.samekana_check_running = False
+
+    if "samekana_check_finished" not in st.session_state:
+        st.session_state.samekana_check_finished = False
+
+    if "same_kana_groups" not in st.session_state:
+        st.session_state.same_kana_groups = {}
+
     if st.button("チェック開始", key="same_kana_check"):
+
+        st.session_state.samekana_check_running = True
+        st.session_state.samekana_check_finished = False
+
+        st.rerun()
+
+    if st.session_state.samekana_check_running:
+
+        st.info("チェック中...")
+
+    if (
+        st.session_state.samekana_check_running
+        and
+        not st.session_state.samekana_check_finished
+    ):
 
         from collections import defaultdict
 
@@ -2390,8 +2522,22 @@ with st.expander("同一かなチェック"):
 
                 checked.add(word)
 
-                kana = knf(word)
+                import re
 
+                def normalize_same_kana(word):
+
+                    kana = knf(word)
+
+                    # カタカナ・アルファベット以外を除去
+                    kana = re.sub(
+                        r"[^ァ-ヶA-Za-zａ-ｚＡ-Ｚ]",
+                        "",
+                        kana
+                    )
+
+                    return kana
+
+                kana = normalize_same_kana(word)
                 kana_groups[kana].append(word)
 
         # 2語以上だけ残す
@@ -2403,18 +2549,75 @@ with st.expander("同一かなチェック"):
 
         st.session_state.same_kana_groups = kana_groups
 
+        st.session_state.samekana_check_running = False
+        st.session_state.samekana_check_finished = True
+
+        st.rerun()
+
     kana_groups = st.session_state.get(
         "same_kana_groups",
         {}
     )
 
-    if kana_groups:
+    if st.session_state.samekana_check_running:
+        st.info("チェック中...")
 
-        st.write(
-            f"同一かなグループ数: {len(kana_groups)}"
-        )
+    elif st.session_state.samekana_check_finished:
+        st.success("チェック終了")
 
-        selected_words = set()
+    if st.session_state.samekana_check_finished:
+
+        kana_groups = st.session_state.same_kana_groups
+
+        st.write(f"同一かなグループ数: {len(kana_groups)}")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            if st.button("全て除去しない"):
+
+                for idx, (_, words) in enumerate(
+                    sorted(
+                        kana_groups.items(),
+                        key=lambda x: len(x[1]),
+                        reverse=True
+                    )
+                ):
+                    st.session_state[f"samekana_{idx}"] = "（どれも除去しない）"
+
+                st.rerun()
+
+        with col2:
+            if st.button("全て一番上を選択"):
+
+                for idx, (_, words) in enumerate(
+                    sorted(
+                        kana_groups.items(),
+                        key=lambda x: len(x[1]),
+                        reverse=True
+                    )
+                ):
+                    if words:
+                        st.session_state[f"samekana_{idx}"] = words[0]
+
+                st.rerun()
+
+        with col3:
+            if st.button("全て一番下を選択"):
+
+                for idx, (_, words) in enumerate(
+                    sorted(
+                        kana_groups.items(),
+                        key=lambda x: len(x[1]),
+                        reverse=True
+                    )
+                ):
+                    if words:
+                        st.session_state[f"samekana_{idx}"] = words[-1]
+
+                st.rerun()
+
+        selected_map = {}
 
         for idx, (kana, words) in enumerate(
             sorted(
@@ -2428,14 +2631,16 @@ with st.expander("同一かなチェック"):
                 f"### {kana} （{len(words)}語）"
             )
 
+            options = ["（どれも除去しない）"] + words
+
             selected = st.radio(
                 "残す単語",
-                words,
+                options,
                 key=f"samekana_{idx}",
                 label_visibility="collapsed"
             )
 
-            selected_words.add(selected)
+            selected_map[kana] = selected
 
         # ------------------
         # words.txt生成
@@ -2457,22 +2662,30 @@ with st.expander("同一かなチェック"):
 
                 all_words.append(word)
 
-        duplicate_words = set()
+        # 単語 → グループかな
+        word_to_kana = {}
 
-        for words in kana_groups.values():
-
-            duplicate_words.update(words)
+        for kana, words in kana_groups.items():
+            for word in words:
+                word_to_kana[word] = kana
 
         filtered_words = []
 
         for word in all_words:
 
-            if word in duplicate_words:
+            if word not in word_to_kana:
+                filtered_words.append(word)
+                continue
 
-                if word in selected_words:
-                    filtered_words.append(word)
+            kana = word_to_kana[word]
+            selected = selected_map[kana]
 
-            else:
+            # 「どれも除去しない」
+            if selected == "（どれも除去しない）":
+                filtered_words.append(word)
+
+            # 選ばれた単語だけ残す
+            elif word == selected:
                 filtered_words.append(word)
 
         filtered_text = "\n".join(
