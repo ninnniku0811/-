@@ -12,6 +12,14 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="母音検索システム", layout="wide")
 
+
+def render_flying_words_background():
+
+    # 背景演出用の関数。
+    # 環境によって未定義エラーにならないよう、軽量な空実装にしています。
+    # 背景演出を追加したい場合は、この関数内だけを編集してください。
+    return
+
 tagger = Tagger()
 
 def attr_text(text):
@@ -2136,7 +2144,6 @@ def render_memory_game_section():
 
 
 st.title("母音検索システム")
-render_flying_words_background()
 
 rl_nm = {
     "ばりかた": 0,
