@@ -82,46 +82,47 @@ def knf(text):
 # お段+う、え段+い を短縮
 # ===========================
 
+# st0用の置換表。毎回リストを作らず、1回の正規表現置換で処理する。
+_ST0_ODAN_HIRA = (
+    'こ', 'そ', 'と', 'の', 'ほ', 'も',
+    'よ', 'ろ', 'を', 'ご', 'ぼ', 'ぽ',
+    'ど', 'お', 'ぞ'
+)
+_ST0_ODAN_KATA = (
+    'コ', 'ソ', 'ト', 'ノ', 'ホ', 'モ',
+    'ヨ', 'ロ', 'ヲ', 'ゴ', 'ボ', 'ポ',
+    'ド', 'オ', 'ゾ'
+)
+_ST0_EDAN_HIRA = (
+    'え',
+    'け', 'せ', 'て', 'ね', 'へ', 'め', 'れ',
+    'げ', 'ぜ', 'で', 'べ', 'ぺ'
+)
+_ST0_EDAN_KATA = (
+    'エ',
+    'ケ', 'セ', 'テ', 'ネ', 'ヘ', 'メ', 'レ',
+    'ゲ', 'ゼ', 'デ', 'ベ', 'ペ'
+)
+_ST0_PAIR_MAP = {}
+_ST0_PAIR_MAP.update({kana + "う": kana + "ー" for kana in _ST0_ODAN_HIRA})
+_ST0_PAIR_MAP.update({kana + "ウ": kana + "ー" for kana in _ST0_ODAN_KATA})
+_ST0_PAIR_MAP.update({kana + "い": kana + "ー" for kana in _ST0_EDAN_HIRA})
+_ST0_PAIR_MAP.update({kana + "イ": kana + "ー" for kana in _ST0_EDAN_KATA})
+_ST0_PAIR_RE = re.compile("|".join(re.escape(k) for k in _ST0_PAIR_MAP))
+_ST0_SOKUON_TRANS = str.maketrans("", "", "っッ")
+
 def st0(word, remove_sokuon=True):
 
     if remove_sokuon:
-        word = word.replace("っ", "")
-        word = word.replace("ッ", "")
+        word = word.translate(_ST0_SOKUON_TRANS)
 
     word = word.replace("ょう", "ょ")
     word = word.replace("ョウ", "ョ")
 
-    # お段 + う
-    for kana in [
-        'こ', 'そ', 'と', 'の', 'ほ', 'も',
-        'よ', 'ろ', 'を', 'ご', 'ぼ', 'ぽ',
-        'ど', 'お', 'ぞ'
-    ]:
-        word = word.replace(kana + "う", kana + "ー")
-
-    for kana in [
-        'コ', 'ソ', 'ト', 'ノ', 'ホ', 'モ',
-        'ヨ', 'ロ', 'ヲ', 'ゴ', 'ボ', 'ポ',
-        'ド', 'オ', 'ゾ'
-    ]:
-        word = word.replace(kana + "ウ", kana + "ー")
-
-    # え段 + い
-    for kana in [
-        'え',
-        'け', 'せ', 'て', 'ね', 'へ', 'め', 'れ',
-        'げ', 'ぜ', 'で', 'べ', 'ぺ'
-    ]:
-        word = word.replace(kana + "い", kana + "ー")
-
-    for kana in [
-        'エ',
-        'ケ', 'セ', 'テ', 'ネ', 'ヘ', 'メ', 'レ',
-        'ゲ', 'ゼ', 'デ', 'ベ', 'ペ'
-    ]:
-        word = word.replace(kana + "イ", kana + "ー")
-
-    return word
+    return _ST0_PAIR_RE.sub(
+        lambda m: _ST0_PAIR_MAP[m.group(0)],
+        word
+    )
 
 
 # ===========================
@@ -808,6 +809,79 @@ def ext_vw_sch(word):
     return "".join(vowels)
 
 
+def ext_keys_f_red(red, rl=2, us12=True):
+
+    # 1語につき必要になる検索キー類をまとめて作る。
+    # bud_dic()内で ext_f_red / ext_group_key_f_red / ext_pre_rep_f_red を
+    # 別々に呼んでいた重複処理を減らすための関数。
+
+    if rl == 0:
+        key = ext_f_red(red, 0, True)
+        return key, key, key
+
+    if rl == 1:
+        key = ext_f_red(red, 1, True)
+        return key, key, key
+
+    word = st0(red, remove_sokuon=True)
+    seq = st1(word)
+
+    seq, stop = rem_dup(seq)
+    if stop:
+        key = "".join(rem_no_vw(seq))
+        return key, key, key
+
+    vowels = rem_no_vw(seq)
+
+    vowels, stop = rem_dup(vowels)
+    if stop:
+        key = "".join(vowels)
+        return key, key, key
+
+    hard_vowel = "".join(vowels)
+
+    if rl >= 2:
+        vowels, stop = rem_mid_vw(vowels, "う")
+        if stop:
+            key = "".join(vowels)
+            return key, hard_vowel, key
+
+    if rl >= 3:
+        vowels, stop = rem_mid_vw(vowels, "い")
+        if stop:
+            key = "".join(vowels)
+            return key, hard_vowel, key
+
+    vowels, stop = rem_dup(vowels)
+    if stop:
+        key = "".join(vowels)
+        return key, hard_vowel, key
+
+    pre_rep_vowel = "".join(vowels)
+
+    if us12:
+        vowels, stop = cmp_p_rep(vowels)
+
+    vowel = "".join(vowels)
+
+    return vowel, hard_vowel, pre_rep_vowel
+
+def add_length_count(length_counts, key):
+
+    l = len(key)
+
+    if l <= 3:
+        length_counts["3以下"] += 1
+    elif l == 4:
+        length_counts["4"] += 1
+    elif l == 5:
+        length_counts["5"] += 1
+    elif l == 6:
+        length_counts["6"] += 1
+    else:
+        length_counts["7以上"] += 1
+
+
 # ===========================
 # words.txt
 # ===========================
@@ -818,6 +892,15 @@ wd_fl = os.path.join(fd, "words.txt")
 def bud_dic(rl, us12):
 
     new_dict = {}
+    hard_index = {}
+    reading_by_word = {}
+    length_counts = {
+        "3以下": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0,
+        "7以上": 0,
+    }
     used = set()
     new_ct = 0
 
@@ -839,11 +922,12 @@ def bud_dic(rl, us12):
             used.add(word)
 
             red = prp_wd(word)
+            reading_by_word[word] = red
 
             red_len = len(red)
 
-            # 辞書側は「羅列を消す」を常時ONにした最終キーで登録する。
-            vowel = ext_f_red(
+            # 最終キー、分類タグ、羅列削除前キーをまとめて作る。
+            vowel, hard_vowel, pre_rep_vowel = ext_keys_f_red(
                 red,
                 rl,
                 us12
@@ -852,46 +936,33 @@ def bud_dic(rl, us12):
             if vowel not in new_dict:
                 new_dict[vowel] = []
 
-            # 分類タグ・長い形での検索用キー。
-            # 検索辞書側の最終キーは羅列削除まで行うが、
-            # 分類タグは「中間う/い削除」と「羅列削除」の前の形で保持する。
-            # これにより、い/うを消した結果として同じ形になる単語は、
-            # 無理に同じ分類タグへ入らず、別タグとして残る。
-            hard_vowel = ext_group_key_f_red(
-                red,
-                rl
-            )
+            item = (word, red_len, hard_vowel, pre_rep_vowel, red)
 
-            pre_rep_vowel = ext_pre_rep_f_red(
-                red,
-                rl
-            )
+            new_dict[vowel].append(item)
 
-            new_dict[vowel].append(
-                (word, red_len, hard_vowel, pre_rep_vowel)
-            )
+            if hard_vowel not in hard_index:
+                hard_index[hard_vowel] = []
+
+            hard_index[hard_vowel].append(item)
+
+            add_length_count(length_counts, vowel)
 
             new_ct += 1
 
     for key in new_dict:
         new_dict[key].sort(key=lambda x: x[1])
 
-    return new_dict, new_ct
+    for key in hard_index:
+        hard_index[key].sort(key=lambda x: x[1])
+
+    return new_dict, new_ct, hard_index, length_counts, reading_by_word
 
 
 
-def collect_search_results(vowel_dict, key, query_pre_rep=None):
+def collect_search_results(vowel_dict, key, query_pre_rep=None, hard_index=None):
 
     # 検索キーに一致するものを返す。
-    # 基本は「最終キー」が検索キーに一致するものを拾う。
-    # ただし検索語自体が羅列削除で短くなる場合は、
-    # 「羅列削除前キー（pre_rep）」が検索語側の pre_rep と一致するものだけに絞る。
-    #
-    # 例：やわめで「おあおあえお」を単語検索
-    #   検索語 pre_rep = おあおあえお
-    #   検索語 final   = おあえお
-    #   ーおあいえおー         は pre_rep が おあえお なので出ない
-    #   ーおあおあいえうおー   は pre_rep が おあおあえお なので出る
+    # hard_index が渡された場合は、分類タグ一致を全辞書走査せずに拾う。
 
     restrict_by_pre_rep = (
         query_pre_rep is not None
@@ -913,19 +984,28 @@ def collect_search_results(vowel_dict, key, query_pre_rep=None):
             seen_words.add(word)
 
     # 検索語が羅列削除で短くならない場合だけ、分類タグそのものに一致する語も補助的に拾う。
-    # 羅列形で検索したときに、検索ルールを変えて別タグを混ぜないため。
+    # 以前は vowel_dict 全体を走査していたが、hard_index がある場合は直接参照する。
     if not restrict_by_pre_rep:
-        for entries in vowel_dict.values():
-            for item in entries:
-                word = item[0]
-                hard_key = item[2] if len(item) >= 3 else ""
-                if hard_key == key and word not in seen_words:
-                    results.append(item)
-                    seen_words.add(word)
+
+        if hard_index is not None:
+            hard_entries = hard_index.get(key, [])
+        else:
+            hard_entries = []
+            for entries in vowel_dict.values():
+                hard_entries.extend(entries)
+
+        for item in hard_entries:
+            word = item[0]
+            hard_key = item[2] if len(item) >= 3 else ""
+
+            if hard_key == key and word not in seen_words:
+                results.append(item)
+                seen_words.add(word)
 
     results.sort(key=lambda x: x[1])
 
     return results
+
 
 
 # ===========================
@@ -1232,98 +1312,6 @@ def render_grouped_result(entries):
 
     height = max(120, min(10000, 65 + len(display_items) * 22))
     components.html(box_html, height=height, scrolling=False)
-
-
-
-# ===========================
-# 背景アニメーション用
-# ===========================
-
-@st.cache_data
-def ld_bg_words():
-    words = []
-    try:
-        with open(wd_fl, encoding="utf-8") as f:
-            for line in f:
-                word = line.strip()
-                if word and not word.startswith("#"):
-                    words.append(word)
-    except Exception:
-        words = []
-
-    if not words:
-        words = ["あいうえお", "母音", "フラッシュカード"]
-
-    short_words = [w for w in words if len(w) <= 14]
-    return short_words or words
-
-
-def render_flying_words_background():
-    words = ld_bg_words()
-
-    spans = []
-    css_parts = []
-
-    # 1秒ごとに1つ出続けるよう、40秒周期に対して40個をずらして回す。
-    # 出現位置は画面端に固定し、そこからランダムな一方向へ飛ばす。
-    for i in range(40):
-        word = html.escape(random.choice(words))
-        side = random.choice(["left", "right", "top", "bottom"])
-
-        if side == "left":
-            x = -12
-            y = random.randint(4, 92)
-            dx = random.randint(105, 145)
-            dy = random.randint(-35, 35)
-        elif side == "right":
-            x = 105
-            y = random.randint(4, 92)
-            dx = -random.randint(105, 145)
-            dy = random.randint(-35, 35)
-        elif side == "top":
-            x = random.randint(0, 92)
-            y = -10
-            dx = random.randint(-35, 35)
-            dy = random.randint(105, 145)
-        else:
-            x = random.randint(0, 92)
-            y = 105
-            dx = random.randint(-35, 35)
-            dy = -random.randint(105, 145)
-
-        start_rot = random.randint(-35, 35)
-        end_rot = start_rot + random.choice([-1, 1]) * random.randint(220, 520)
-        size = random.uniform(1.4, 3.2)
-        delay = i
-
-        spans.append(f'<span class="fly-word fly-word-{i}">{word}</span>')
-        css_parts.append(
-            f'.fly-word-{i}{{left:{x}vw;top:{y}vh;font-size:clamp(1.1rem,{size:.2f}vw,3.2rem);animation-delay:{delay}s;--dx:{dx}vw;--dy:{dy}vh;--start-rot:{start_rot}deg;--end-rot:{end_rot}deg;}}'
-        )
-
-    # st.markdown だと環境によって <style> 内の @keyframes が本文として表示されることがあるため、
-    # CSS/HTML 注入専用の st.html を使う。
-    bg_html = (
-        '<div class="flying-words-bg" aria-hidden="true">'
-        + ''.join(spans)
-        + '</div>'
-        + '<style>'
-        + '.flying-words-bg{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;overflow:hidden;z-index:0;}'
-        + '.stApp header,.stApp [data-testid="stToolbar"],.stApp [data-testid="stDecoration"],.stApp [data-testid="stStatusWidget"],.stApp [data-testid="stAppViewContainer"]{position:relative;z-index:1;}'
-        + '.stApp [data-testid="stAppViewContainer"]{background:transparent;}'
-        + '.stApp .block-container{position:relative;z-index:2;}'
-        + '.fly-word{position:absolute;display:inline-block;color:rgba(80,80,80,.30);font-weight:900;letter-spacing:.05em;white-space:nowrap;text-shadow:0 1px 10px rgba(0,0,0,.12);user-select:none;opacity:0;transform:translate(0,0) rotate(var(--start-rot));animation:flyWord 40s linear infinite;will-change:transform,opacity;}'
-        + ''.join(css_parts)
-        + '@keyframes flyWord{0%{opacity:0;transform:translate(0,0) rotate(var(--start-rot));}2%{opacity:.36;}10%{opacity:.28;}18%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--end-rot));}}'
-        + '@media (max-width:640px){.fly-word{color:rgba(80,80,80,.25);max-width:90vw;}}'
-        + '</style>'
-    )
-
-    if hasattr(st, "html"):
-        st.html(bg_html)
-    else:
-        st.markdown(bg_html, unsafe_allow_html=True)
-
 
 # ===========================
 # 母音フラッシュカード用
@@ -1765,7 +1753,7 @@ def render_flashcard_section():
             label_visibility="collapsed"
         )
 
-        flash_dic, flash_ct = ld_flash_dic(
+        flash_dic, flash_ct, _, _, _ = ld_flash_dic(
             flash_rl,
             flash_us12
         )
@@ -1907,7 +1895,7 @@ def render_flashcard_section():
 
 def build_memory_cards(rl, us12=True, pair_count=6):
 
-    mem_dic, mem_ct = ld_dic(rl, us12)
+    mem_dic, mem_ct, _, _, _ = ld_dic(rl, us12)
 
     candidates = []
 
@@ -2187,74 +2175,12 @@ def ld_dic(
         us12
     )
 
-vw_dic, ct = ld_dic(
+vw_dic, ct, hard_index, length_counts, reading_by_word = ld_dic(
     rl,
     us12
 )
 
-length_count = {
-    "3以下": 0,
-    "4": 0,
-    "5": 0,
-    "6": 0,
-    "7以上": 0
-}
-
-for key, words in vw_dic.items():
-
-    l = len(key)
-    c = len(words)
-
-    if l <= 3:
-        length_count["3以下"] += c
-    elif l == 4:
-        length_count["4"] += c
-    elif l == 5:
-        length_count["5"] += c
-    elif l == 6:
-        length_count["6"] += c
-    else:
-        length_count["7以上"] += c
-
-# 母音長ごとの登録単語数を集計
-length_counts = {
-    "3以下": 0,
-    "4": 0,
-    "5": 0,
-    "6": 0,
-    "7以上": 0,
-}
-
-counted = set()
-
-for words in vw_dic.values():
-
-    for word, *_ in words:
-
-        if word in counted:
-            continue
-
-        counted.add(word)
-
-        key = ext(
-            word,
-            rl,
-            us12
-        )
-
-        l = len(key)
-
-        if l <= 3:
-            length_counts["3以下"] += 1
-        elif l == 4:
-            length_counts["4"] += 1
-        elif l == 5:
-            length_counts["5"] += 1
-        elif l == 6:
-            length_counts["6"] += 1
-        else:
-            length_counts["7以上"] += 1
-
+# 母音長ごとの登録単語数は bud_dic() 内で作成済み。
 st.caption(
     f"登録単語数: {ct:,} 　"
     f"(母音の長さ "
@@ -2297,7 +2223,7 @@ if qu:
             rl
         )
 
-    res = collect_search_results(vw_dic, key, query_pre_rep)
+    res = collect_search_results(vw_dic, key, query_pre_rep, hard_index)
 
     st.write("検索キー:", key)
     st.write("一致件数:", len(res))
@@ -2352,9 +2278,6 @@ with st.expander("未読漢字チェック"):
     if "kanji_check_finished" not in st.session_state:
         st.session_state.kanji_check_finished = False
 
-    if "kanji_check_result" not in st.session_state:
-        st.session_state.kanji_check_result = []
-
     if "kanji_problems" not in st.session_state:
         st.session_state.kanji_problems = []
 
@@ -2394,7 +2317,10 @@ with st.expander("未読漢字チェック"):
 
                 checked.add(word)
 
-                reading = knf(word)
+                reading = reading_by_word.get(word)
+
+                if reading is None:
+                    reading = knf(word)
 
                 remain = "".join(
                     kanji_re.findall(reading)
@@ -2419,15 +2345,10 @@ with st.expander("未読漢字チェック"):
 
     problems = st.session_state.kanji_problems
 
-    if st.session_state.kanji_check_running:
-        st.info("チェック中...")
-
-    elif st.session_state.kanji_check_finished:
+    if st.session_state.kanji_check_finished:
         st.success("チェック終了")
 
     if st.session_state.kanji_check_finished:
-
-        problems = st.session_state.kanji_check_result
 
         st.write(f"件数: {len(problems)}")
 
@@ -2526,7 +2447,10 @@ with st.expander("同一かなチェック"):
 
                 def normalize_same_kana(word):
 
-                    kana = knf(word)
+                    kana = reading_by_word.get(word)
+
+                    if kana is None:
+                        kana = knf(word)
 
                     # カタカナ・アルファベット以外を除去
                     kana = re.sub(
@@ -2559,10 +2483,7 @@ with st.expander("同一かなチェック"):
         {}
     )
 
-    if st.session_state.samekana_check_running:
-        st.info("チェック中...")
-
-    elif st.session_state.samekana_check_finished:
+    if st.session_state.samekana_check_finished:
         st.success("チェック終了")
 
     if st.session_state.samekana_check_finished:
