@@ -2237,22 +2237,8 @@ if qu:
 
     if res:
 
-        use_grouped_view = (
-            rl >= 2
-            and has_same_hard_group(res)
-        )
-
-        if use_grouped_view:
-            render_grouped_result(res)
-        else:
-            res_tx = "\n".join(
-                item[0] for item in res
-            )
-
-            st.code(
-                res_tx,
-                language=None
-            )
+        # 検索タグが複数ある場合も、ない場合も、同じUIで表示する。
+        render_grouped_result(res)
 
     else:
         st.info("一致する単語はありません。")
