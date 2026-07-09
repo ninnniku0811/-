@@ -613,12 +613,6 @@ def ext_vw_rule_f_red(red, rl=2, us12=True):
         vowels, stop = cmp_dup_vw(vowels)
         return "".join(vowels)
 
-    if rl == 1:
-        seq = othello_non_vowels_between_same_vowels(seq)
-        vowels = rem_no_vw(seq)
-        vowels, stop = cmp_dup_vw_old_barikata(vowels)
-        return "".join(vowels)
-
     seq, stop = rem_dup(seq)
     if stop:
         return "".join(rem_no_vw(seq))
@@ -660,12 +654,6 @@ def ext_vw_pre_rep_f_red(red, rl=2):
     if rl == 0:
         vowels = rem_no_vw(seq)
         vowels, stop = cmp_dup_vw(vowels)
-        return "".join(vowels)
-
-    if rl == 1:
-        seq = othello_non_vowels_between_same_vowels(seq)
-        vowels = rem_no_vw(seq)
-        vowels, stop = cmp_dup_vw_old_barikata(vowels)
         return "".join(vowels)
 
     seq, stop = rem_dup(seq)
@@ -732,12 +720,6 @@ def ext_f_red(
         seq, stop = cmp_dup_vw(seq)
 
         return "".join(seq)
-
-    if rl == 1:
-
-        # かためは「旧ばりかた」ベース。
-        # 同じ母音に挟まれた母音以外は、その母音に変える。
-        return ext_old_barikata_f_red(red)
 
     word = st0(red, remove_sokuon=True)
 
