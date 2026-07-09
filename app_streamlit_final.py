@@ -656,6 +656,11 @@ def ext_vw_pre_rep_f_red(red, rl=2):
         vowels, stop = cmp_dup_vw(vowels)
         return "".join(vowels)
 
+    if rl == 1:
+        # かためでは、母音検索側も表示される検索キーと内部キーを一致させる。
+        # 例：あうあいあいあ → あうあいあ
+        return ext_vw_rule_f_red(red, 1, True)
+
     seq, stop = rem_dup(seq)
     if stop:
         return "".join(rem_no_vw(seq))
