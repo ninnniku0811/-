@@ -230,11 +230,12 @@ def st1(word):
 
 # ===========================
 # 音節分けルール
+# ④：あ段+い / え段+い / お段+う / う段+う を長音化
 # rl = 4
 # ===========================
 
 def syllable_st4(word):
-    """音節分け④：え段+い、お段+う、う段+う を長音「ー」にする。"""
+    """音節分け④：あ段+い、え段+い、お段+う、う段+う を長音「ー」にする。"""
 
     chars = list(word)
 
@@ -251,7 +252,7 @@ def syllable_st4(word):
         else:
             prev_vowel = vw_mp.get(prev)
 
-        if ch in ("い", "イ") and prev_vowel == "え":
+        if ch in ("い", "イ") and prev_vowel in ("あ", "え"):
             chars[i] = "ー"
         elif ch in ("う", "ウ") and prev_vowel in ("お", "う"):
             chars[i] = "ー"
