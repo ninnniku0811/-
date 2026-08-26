@@ -3,6 +3,7 @@ import re
 import html
 import json
 import random
+import unicodedata
 
 from fugashi import Tagger
 from kanjize import number2kanji
@@ -461,10 +462,34 @@ def cmp_p_rep(vowels):
 # 母音抽出（新仕様）
 # ===========================
 
+def remove_unread_chars(text):
+    """発音しない区切り記号・空白を検索処理から除外する。長音記号「ー」は残す。"""
+
+    result = []
+
+    for ch in text:
+        if ch == "ー":
+            result.append(ch)
+            continue
+
+        category = unicodedata.category(ch)
+
+        # P*: 句読点・中黒・括弧・ハイフン等
+        # Z*: 半角/全角スペース等
+        # これらは発音しないものとして完全に無視する。
+        if category.startswith("P") or category.startswith("Z"):
+            continue
+
+        result.append(ch)
+
+    return "".join(result)
+
+
 def prp_wd(word):
 
     word = replace_alp(word)
     red = knf(word)
+    red = remove_unread_chars(red)
 
     return red
 
