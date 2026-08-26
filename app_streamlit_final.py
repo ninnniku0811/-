@@ -236,14 +236,27 @@ def st1(word):
 # ===========================
 
 def syllable_st4(word):
-    """音節分け④：あ段+い、え段+い、お段+う、う段+う を長音「ー」にする。"""
+    """音節分け④：長音として扱う母音の連続を「ー」にする。
+
+    対象：
+      ・同じ母音が続く場合（あ段+あ / い段+い / う段+う / え段+え / お段+お）
+      ・あ段+い / え段+い / お段+う
+
+    ただし「あ段+い」に限り、その「い」が単語末尾なら長音化しない。
+    例：かい→かい、たい→たい、かいしゃ→かーしゃ、たいかい→たーかい
+    """
 
     chars = list(word)
+    vowel_chars = {
+        "あ": "あ", "い": "い", "う": "う", "え": "え", "お": "お",
+        "ア": "あ", "イ": "い", "ウ": "う", "エ": "え", "オ": "お",
+    }
 
     for i in range(1, len(chars)):
         ch = chars[i]
+        current_vowel = vowel_chars.get(ch)
 
-        if ch not in ("い", "イ", "う", "ウ"):
+        if current_vowel is None:
             continue
 
         prev = chars[i - 1]
@@ -253,9 +266,22 @@ def syllable_st4(word):
         else:
             prev_vowel = vw_mp.get(prev)
 
-        if ch in ("い", "イ") and prev_vowel in ("あ", "え"):
+        # 同じ母音が続く場合は長音化する。
+        if prev_vowel == current_vowel:
             chars[i] = "ー"
-        elif ch in ("う", "ウ") and prev_vowel in ("お", "う"):
+            continue
+
+        # あ段+い。末尾の「い」に限っては残す。
+        if ch in ("い", "イ") and prev_vowel == "あ":
+            if i != len(chars) - 1:
+                chars[i] = "ー"
+
+        # え段+い は末尾でも通常どおり長音化。
+        elif ch in ("い", "イ") and prev_vowel == "え":
+            chars[i] = "ー"
+
+        # お段+う は末尾でも通常どおり長音化。
+        elif ch in ("う", "ウ") and prev_vowel == "お":
             chars[i] = "ー"
 
     return "".join(chars)
@@ -280,7 +306,7 @@ def syllable_st5(word):
         if vowel in ("あ", "い", "う", "え", "お"):
             result.append(vowel)
         else:
-            # 長音、促音、撥音、記号など母音を持たない発音は「ー」。
+            # 長音、促音、撥音など、母音を持たない発音は「ー」。
             result.append("ー")
 
         i += 1
@@ -289,22 +315,30 @@ def syllable_st5(word):
 
 
 def syllable_st7(seq):
-    """音節分け⑦：連続する「う」の2,4,6...文字目を「ー」にし、末尾の「ー」を削除する。"""
+    """音節分け⑦：同じ母音の連続を交互に「ー」へ置換し、末尾長音を削除する。
+
+    例：
+      ああ     → あー
+      いいい   → いーい
+      うううう → うーうー
+    """
 
     seq = list(seq)
+    vowels = {"あ", "い", "う", "え", "お"}
     i = 0
 
     while i < len(seq):
 
-        if seq[i] != "う":
+        if seq[i] not in vowels:
             i += 1
             continue
 
+        vowel = seq[i]
         j = i + 1
-        while j < len(seq) and seq[j] == "う":
+        while j < len(seq) and seq[j] == vowel:
             j += 1
 
-        # うう→うー、ううう→うーう、うううう→うーうー ...
+        # 2,4,6...文字目を「ー」にする。
         for k in range(i + 1, j, 2):
             seq[k] = "ー"
 
