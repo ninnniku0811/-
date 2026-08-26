@@ -229,6 +229,139 @@ def st1(word):
 
 
 # ===========================
+# 音節分けルール
+# rl = 4
+# ===========================
+
+def syllable_st4(word):
+    """音節分け④：え段+い、お段+う、う段+う を長音「ー」にする。"""
+
+    chars = list(word)
+
+    for i in range(1, len(chars)):
+        ch = chars[i]
+
+        if ch not in ("い", "イ", "う", "ウ"):
+            continue
+
+        prev = chars[i - 1]
+
+        if prev in sm_mp:
+            prev_vowel = sm_mp[prev]
+        else:
+            prev_vowel = vw_mp.get(prev)
+
+        if ch in ("い", "イ") and prev_vowel == "え":
+            chars[i] = "ー"
+        elif ch in ("う", "ウ") and prev_vowel in ("お", "う"):
+            chars[i] = "ー"
+
+    return "".join(chars)
+
+
+def syllable_st5(word):
+    """音節分け⑤：母音列化。母音を持たない発音は「ー」にする。"""
+
+    result = []
+    i = 0
+
+    while i < len(word):
+
+        # 拗音・小書き母音は、前の文字と合わせて1音節として扱う。
+        if i + 1 < len(word) and word[i + 1] in sm_mp:
+            result.append(sm_mp[word[i + 1]])
+            i += 2
+            continue
+
+        vowel = vw_mp.get(word[i])
+
+        if vowel in ("あ", "い", "う", "え", "お"):
+            result.append(vowel)
+        else:
+            # 長音、促音、撥音、記号など母音を持たない発音は「ー」。
+            result.append("ー")
+
+        i += 1
+
+    return result
+
+
+def syllable_st7(seq):
+    """音節分け⑦：連続する「う」の2,4,6...文字目を「ー」にし、末尾の「ー」を削除する。"""
+
+    seq = list(seq)
+    i = 0
+
+    while i < len(seq):
+
+        if seq[i] != "う":
+            i += 1
+            continue
+
+        j = i + 1
+        while j < len(seq) and seq[j] == "う":
+            j += 1
+
+        # うう→うー、ううう→うーう、うううう→うーうー ...
+        for k in range(i + 1, j, 2):
+            seq[k] = "ー"
+
+        i = j
+
+    # 「ありがとう → あいあおー」のように末尾が長音なら削除する。
+    while seq and seq[-1] == "ー":
+        seq.pop()
+
+    return seq
+
+
+def syllable_st8(seq):
+    """音節分け⑧：途中の「う」を長音化し、連続する「ー」を1個にまとめる。"""
+
+    src = list(seq)
+    out = list(seq)
+    n = len(src)
+
+    for i, ch in enumerate(src):
+
+        if ch != "う":
+            continue
+
+        # 最初・最後・最後から2番目の「う」は残す。
+        if i == 0 or i == n - 1 or i == n - 2:
+            continue
+
+        # 「ー」の直前・直後にある「う」は残す。
+        prev_ch = src[i - 1] if i > 0 else None
+        next_ch = src[i + 1] if i + 1 < n else None
+
+        if prev_ch == "ー" or next_ch == "ー":
+            continue
+
+        out[i] = "ー"
+
+    # ーー、ーーー... は1個の「ー」にまとめる。
+    result = []
+    for ch in out:
+        if ch == "ー" and result and result[-1] == "ー":
+            continue
+        result.append(ch)
+
+    return result
+
+
+def ext_syllable_f_red(red):
+    """音節分け①〜⑧を適用した最終検索キーを返す。①〜③は prp_wd() で処理済み。"""
+
+    word = syllable_st4(red)
+    seq = syllable_st5(word)
+    seq = syllable_st7(seq)
+    seq = syllable_st8(seq)
+
+    return "".join(seq)
+
+
+# ===========================
 # Step3
 # ふつう：途中の「う」を消す
 # やわめ：途中の「う」「い」を消す
@@ -507,6 +640,9 @@ def ext_old_katame_group_f_red(red, us12=True):
 
 def ext_group_key_f_red(red, rl=2):
 
+    if rl == 4:
+        return ext_syllable_f_red(red)
+
     # 分類タグ・長い形での検索用キー。
     # 最終的に検索辞書へ登録するキーとは分ける。
     #
@@ -544,6 +680,9 @@ def ext_group_key_f_red(red, rl=2):
 
 
 def ext_pre_rep_f_red(red, rl=2):
+
+    if rl == 4:
+        return ext_syllable_f_red(red)
 
     # 検索フィルタ用キー。
     # 最終キーの直前、つまり「羅列削除」だけを行う前の状態を返す。
@@ -603,6 +742,9 @@ def ext_pre_rep(word, rl=2):
 
 def ext_vw_rule_f_red(red, rl=2, us12=True):
 
+    if rl == 4:
+        return ext_syllable_f_red(red)
+
     # 母音検索用：お段+う、え段+いの短縮（st0）は行わない。
     # それ以外の選択ルールは単語検索側と同じ流れで適用する。
 
@@ -644,6 +786,9 @@ def ext_vw_rule_f_red(red, rl=2, us12=True):
 
 
 def ext_vw_pre_rep_f_red(red, rl=2):
+
+    if rl == 4:
+        return ext_syllable_f_red(red)
 
     # 母音検索用の羅列削除前キー。
     # st0は使わず、お段+う / え段+い は消さない。
@@ -714,6 +859,9 @@ def ext_f_red(
     rl=2,
     us12=True
 ):
+
+    if rl == 4:
+        return ext_syllable_f_red(red)
 
     if rl == 0:
 
@@ -806,7 +954,11 @@ def ext_vw_sch(word):
 
 def ext_keys_f_red(red, rl=2, us12=True):
 
-    # 1語につき必要になる検索キー類をまとめて作る。
+    if rl == 4:
+        key = ext_syllable_f_red(red)
+        return key, key, key
+
+    # 1語につき必要になる検索キー類をまとめて作る.
     # bud_dic()内で ext_f_red / ext_group_key_f_red / ext_pre_rep_f_red を
     # 別々に呼んでいた重複処理を減らすための関数。
 
@@ -1714,6 +1866,7 @@ def render_flashcard_section():
             "かため": 1,
             "ふつう": 2,
             "やわめ": 3,
+            "音節分け": 4,
         }
 
         flash_rl_lb = st.radio(
@@ -2035,6 +2188,7 @@ def render_memory_game_section():
             "かため": 1,
             "ふつう": 2,
             "やわめ": 3,
+            "音節分け": 4,
         }
 
         mem_rl_lb = st.radio(
@@ -2137,6 +2291,7 @@ rl_nm = {
     "かため": 1,
     "ふつう": 2,
     "やわめ": 3,
+    "音節分け": 4,
 }
 
 rl_lb = st.radio(
