@@ -13,6 +13,8 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="母音検索システム", layout="wide")
 
+# 更新: あ段+い保持 / フラッシュカード自由文字数 / ばりかた探し追加
+
 
 def render_flying_words_background():
 
@@ -231,14 +233,15 @@ def st1(word):
 
 # ===========================
 # 音節分けルール
-# ④：あ段+い（末尾除外）/ え段+い / お段+う / う段+う を長音化
+# ④：え段+い / お段+う / う段+う を長音化
+# ※ あ段+い の「い」は消さず、そのまま残す。
 # rl = 4
 # ===========================
 
 def syllable_st4(word):
     """
     音節分け④：
-    ・あ段+い → 長音「ー」。ただし、その「い」が単語末尾なら残す。
+    ・あ段+い は変換せず、「い」をそのまま残す。
     ・え段+い → 長音「ー」。
     ・お段+う / う段+う → 長音「ー」。
     """
@@ -259,11 +262,8 @@ def syllable_st4(word):
             prev_vowel = vw_mp.get(prev)
 
         if ch in ("い", "イ"):
-            # あ段+い は途中だけ長音化する。
-            # 例：かいしゃ→かーしゃ / たいかい→たーかい / かい→かい
-            if prev_vowel == "あ" and i != len(chars) - 1:
-                chars[i] = "ー"
-            elif prev_vowel == "え":
+            # あ段+い は変換しない。え段+い だけ長音化する。
+            if prev_vowel == "え":
                 chars[i] = "ー"
 
         elif ch in ("う", "ウ") and prev_vowel in ("お", "う"):
@@ -1501,16 +1501,6 @@ def render_grouped_result(entries):
 # 母音フラッシュカード用
 # ===========================
 
-def len_match_key(key, len_label):
-
-    if len_label == "4":
-        return len(key) == 4
-    if len_label == "5":
-        return len(key) == 5
-    if len_label == "6":
-        return len(key) == 6
-    return len(key) >= 7
-
 @st.cache_data
 def ld_flash_dic(
     rl,
@@ -1521,13 +1511,14 @@ def ld_flash_dic(
         us12
     )
 
-def get_flash_candidates(vowel_dict, len_label):
+def get_flash_candidates(vowel_dict, target_len):
+    """指定した文字数と完全一致し、2語以上ある検索キーだけを返す。"""
 
     candidates = []
 
     for key, entries in vowel_dict.items():
 
-        if not len_match_key(key, len_label):
+        if len(key) != target_len:
             continue
 
         if len(entries) < 2:
@@ -1928,24 +1919,33 @@ def render_flashcard_section():
             key="flash_output_mode"
         )
 
-        st.markdown("**文字数を指定**")
-        len_label = st.radio(
-            "文字数を指定",
-            ["4", "5", "6", "7以上"],
-            horizontal=True,
-            index=0,
-            key="flash_len",
-            label_visibility="collapsed"
-        )
-
         flash_dic, flash_ct, _, _, _ = ld_flash_dic(
             flash_rl,
             flash_us12
         )
 
+        available_lengths = [
+            len(key)
+            for key, entries in flash_dic.items()
+            if len(entries) >= 2 and key
+        ]
+        max_flash_len = max(available_lengths, default=4)
+        default_flash_len = min(4, max_flash_len)
+
+        st.markdown("**文字数を指定**")
+        target_len = int(st.number_input(
+            "文字数を指定",
+            min_value=1,
+            max_value=max_flash_len,
+            value=default_flash_len,
+            step=1,
+            key="flash_len_number",
+            label_visibility="collapsed"
+        ))
+
         candidates = get_flash_candidates(
             flash_dic,
-            len_label
+            target_len
         )
 
         st.caption(
@@ -1958,7 +1958,7 @@ def render_flashcard_section():
             "flash_card_entries": [],
             "flash_card_answer": False,
             "flash_card_rule": flash_rl_lb,
-            "flash_card_len": len_label,
+            "flash_card_len": target_len,
             "flash_card_us12": flash_us12,
             "flash_card_output_mode": output_mode,
             "flash_card_display": "",
@@ -1974,7 +1974,7 @@ def render_flashcard_section():
 
         changed_cond = (
             st.session_state.flash_card_rule != flash_rl_lb
-            or st.session_state.flash_card_len != len_label
+            or st.session_state.flash_card_len != target_len
             or st.session_state.flash_card_us12 != flash_us12
             or st.session_state.flash_card_output_mode != output_mode
         )
@@ -1985,7 +1985,7 @@ def render_flashcard_section():
             st.session_state.flash_card_entries = []
             st.session_state.flash_card_answer = False
             st.session_state.flash_card_rule = flash_rl_lb
-            st.session_state.flash_card_len = len_label
+            st.session_state.flash_card_len = target_len
             st.session_state.flash_card_us12 = flash_us12
             st.session_state.flash_card_output_mode = output_mode
             st.session_state.flash_card_display = ""
@@ -2072,6 +2072,108 @@ def render_flashcard_section():
 
         with hist_col:
             render_flash_history(st.session_state.flash_card_history)
+
+
+# ===========================
+# ばりかた探し
+# ===========================
+
+@st.cache_data
+def ld_barikata_finder_index(words_mtime):
+    """
+    ばりかた(rl=0)の韻グループを文字数別に一度だけ索引化する。
+    words.txt の更新時刻を引数にすることで、辞書更新時はキャッシュを自動更新する。
+    """
+
+    vowel_dict, word_count, _, _, _ = bud_dic(0, True)
+    groups_by_length = {}
+
+    for key, entries in vowel_dict.items():
+        # 「韻」として並べるため、同じキーに2語以上あるものだけ対象にする。
+        if not key or len(entries) < 2:
+            continue
+
+        words = tuple(item[0] for item in entries)
+        groups_by_length.setdefault(len(key), []).append((key, words))
+
+    for length in groups_by_length:
+        groups_by_length[length].sort(key=lambda x: x[0])
+
+    return groups_by_length, word_count
+
+
+def render_barikata_finder_section():
+
+    st.markdown("---")
+    st.subheader("ばりかた探し")
+
+    with st.container(border=True):
+        st.caption(
+            "指定した文字数の『ばりかた』の韻を一覧表示します。"
+            "動作を軽くするため、初回だけ索引を作り、40グループずつ表示します。"
+        )
+
+        target_len = int(st.number_input(
+            "ばりかたの文字数",
+            min_value=1,
+            max_value=100,
+            value=4,
+            step=1,
+            key="barikata_finder_len",
+        ))
+
+        if st.button("この文字数を表示", key="barikata_finder_show"):
+            st.session_state.barikata_finder_active_len = target_len
+
+        active_len = st.session_state.get("barikata_finder_active_len")
+
+        if active_len is None:
+            st.info("文字数を指定して『この文字数を表示』を押してください。")
+            return
+
+        try:
+            words_mtime = os.path.getmtime(wd_fl)
+        except OSError:
+            words_mtime = 0
+
+        groups_by_length, word_count = ld_barikata_finder_index(words_mtime)
+        groups = groups_by_length.get(active_len, [])
+
+        st.caption(
+            f"{active_len}文字 / 韻グループ数: {len(groups):,} / 登録単語数: {word_count:,}"
+        )
+
+        if not groups:
+            st.info("この文字数には、2語以上ある『ばりかた』の韻がありません。")
+            return
+
+        # 一度に大量のStreamlit部品を作ると重くなるため、文字列1ブロックにまとめてページ分割する。
+        page_size = 40
+        total_pages = (len(groups) + page_size - 1) // page_size
+        page = int(st.number_input(
+            "ページ",
+            min_value=1,
+            max_value=total_pages,
+            value=1,
+            step=1,
+            key=f"barikata_finder_page_{active_len}",
+        ))
+
+        start = (page - 1) * page_size
+        end = min(start + page_size, len(groups))
+        page_groups = groups[start:end]
+
+        lines = []
+        for key, words in page_groups:
+            lines.append(f"ー{key}ー")
+            lines.extend(words)
+            lines.append("")
+
+        st.code("\n".join(lines), language=None)
+        st.caption(
+            f"{start + 1:,}〜{end:,}グループ目 / 全{len(groups):,}グループ "
+            f"（{page}/{total_pages}ページ）"
+        )
 
 
 # ===========================
@@ -2440,6 +2542,7 @@ with st.expander("変換テスト"):
 
 
 render_flashcard_section()
+render_barikata_finder_section()
 render_memory_game_section()
 
 with st.expander("未読漢字チェック"):
