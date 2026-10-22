@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="母音検索システム", layout="wide")
 
-# 更新: あ段+い保持 / フラッシュカード自由文字数 / ばりかた探し追加
+# 更新: あ段+い保持 / フラッシュカード自由文字数＋以上指定 / ばりかた探し追加＋以上指定
 
 
 def render_flying_words_background():
@@ -1511,22 +1511,28 @@ def ld_flash_dic(
         us12
     )
 
-def get_flash_candidates(vowel_dict, target_len):
-    """指定した文字数と完全一致し、2語以上ある検索キーだけを返す。"""
+def get_flash_candidates(vowel_dict, target_len, length_mode="ちょうど"):
+    """指定文字数（ちょうど / 以上）に合い、2語以上ある検索キーだけを返す。"""
 
     candidates = []
 
     for key, entries in vowel_dict.items():
 
-        if len(key) != target_len:
-            continue
+        key_len = len(key)
+
+        if length_mode == "以上":
+            if key_len < target_len:
+                continue
+        else:
+            if key_len != target_len:
+                continue
 
         if len(entries) < 2:
             continue
 
         candidates.append(key)
 
-    candidates.sort()
+    candidates.sort(key=lambda x: (len(x), x))
 
     return candidates
 
@@ -1933,6 +1939,13 @@ def render_flashcard_section():
         default_flash_len = min(4, max_flash_len)
 
         st.markdown("**文字数を指定**")
+        length_mode = st.radio(
+            "文字数条件",
+            ["ちょうど", "以上"],
+            horizontal=True,
+            index=0,
+            key="flash_len_mode",
+        )
         target_len = int(st.number_input(
             "文字数を指定",
             min_value=1,
@@ -1945,11 +1958,17 @@ def render_flashcard_section():
 
         candidates = get_flash_candidates(
             flash_dic,
-            target_len
+            target_len,
+            length_mode,
         )
 
+        flash_len_label = (
+            f"{target_len}文字以上"
+            if length_mode == "以上"
+            else f"{target_len}文字"
+        )
         st.caption(
-            f"対象母音数: {len(candidates):,} / 登録単語数: {flash_ct:,}"
+            f"条件: {flash_len_label} / 対象母音数: {len(candidates):,} / 登録単語数: {flash_ct:,}"
         )
 
         init_values = {
@@ -1959,6 +1978,7 @@ def render_flashcard_section():
             "flash_card_answer": False,
             "flash_card_rule": flash_rl_lb,
             "flash_card_len": target_len,
+            "flash_card_len_mode": length_mode,
             "flash_card_us12": flash_us12,
             "flash_card_output_mode": output_mode,
             "flash_card_display": "",
@@ -1975,6 +1995,7 @@ def render_flashcard_section():
         changed_cond = (
             st.session_state.flash_card_rule != flash_rl_lb
             or st.session_state.flash_card_len != target_len
+            or st.session_state.flash_card_len_mode != length_mode
             or st.session_state.flash_card_us12 != flash_us12
             or st.session_state.flash_card_output_mode != output_mode
         )
@@ -1986,6 +2007,7 @@ def render_flashcard_section():
             st.session_state.flash_card_answer = False
             st.session_state.flash_card_rule = flash_rl_lb
             st.session_state.flash_card_len = target_len
+            st.session_state.flash_card_len_mode = length_mode
             st.session_state.flash_card_us12 = flash_us12
             st.session_state.flash_card_output_mode = output_mode
             st.session_state.flash_card_display = ""
@@ -2113,6 +2135,14 @@ def render_barikata_finder_section():
             "動作を軽くするため、初回だけ索引を作り、40グループずつ表示します。"
         )
 
+        length_mode = st.radio(
+            "ばりかたの文字数条件",
+            ["ちょうど", "以上"],
+            horizontal=True,
+            index=0,
+            key="barikata_finder_len_mode",
+        )
+
         target_len = int(st.number_input(
             "ばりかたの文字数",
             min_value=1,
@@ -2122,13 +2152,15 @@ def render_barikata_finder_section():
             key="barikata_finder_len",
         ))
 
-        if st.button("この文字数を表示", key="barikata_finder_show"):
+        if st.button("この条件を表示", key="barikata_finder_show"):
             st.session_state.barikata_finder_active_len = target_len
+            st.session_state.barikata_finder_active_mode = length_mode
 
         active_len = st.session_state.get("barikata_finder_active_len")
+        active_mode = st.session_state.get("barikata_finder_active_mode", "ちょうど")
 
         if active_len is None:
-            st.info("文字数を指定して『この文字数を表示』を押してください。")
+            st.info("文字数と条件を指定して『この条件を表示』を押してください。")
             return
 
         try:
@@ -2137,14 +2169,23 @@ def render_barikata_finder_section():
             words_mtime = 0
 
         groups_by_length, word_count = ld_barikata_finder_index(words_mtime)
-        groups = groups_by_length.get(active_len, [])
+
+        if active_mode == "以上":
+            groups = []
+            for length in sorted(groups_by_length):
+                if length >= active_len:
+                    groups.extend(groups_by_length[length])
+            active_label = f"{active_len}文字以上"
+        else:
+            groups = groups_by_length.get(active_len, [])
+            active_label = f"{active_len}文字"
 
         st.caption(
-            f"{active_len}文字 / 韻グループ数: {len(groups):,} / 登録単語数: {word_count:,}"
+            f"{active_label} / 韻グループ数: {len(groups):,} / 登録単語数: {word_count:,}"
         )
 
         if not groups:
-            st.info("この文字数には、2語以上ある『ばりかた』の韻がありません。")
+            st.info("この条件には、2語以上ある『ばりかた』の韻がありません。")
             return
 
         # 一度に大量のStreamlit部品を作ると重くなるため、文字列1ブロックにまとめてページ分割する。
@@ -2156,7 +2197,7 @@ def render_barikata_finder_section():
             max_value=total_pages,
             value=1,
             step=1,
-            key=f"barikata_finder_page_{active_len}",
+            key=f"barikata_finder_page_{active_mode}_{active_len}",
         ))
 
         start = (page - 1) * page_size
