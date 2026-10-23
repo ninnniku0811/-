@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="母音検索システム", layout="wide")
 
-# 更新: フラッシュカード自由文字数＋以上指定 / 韻探し（全ルール対応・開閉式） / user_words.txt分離保存 / TXT一括追加
+# 更新: 韻探し優先UI / expander開閉 / 羅列削除時の検索キー表示統一 / 韻キー色分け / user_words.txt分離保存 / TXT一括追加
 
 
 def render_flying_words_background():
@@ -1216,6 +1216,17 @@ def collect_search_results(vowel_dict, key, query_pre_rep=None, hard_index=None)
     return results
 
 
+def get_actual_search_display_key(final_key, pre_rep_key):
+    """
+    画面に出す検索キー。
+    羅列削除で final_key が短くなった場合、実際の検索では pre_rep_key も
+    一致条件として使うため、ユーザーに見せるキーもその実照合形へ統一する。
+    """
+    if pre_rep_key is not None and pre_rep_key != final_key:
+        return pre_rep_key
+    return final_key
+
+
 
 # ===========================
 # 表示用
@@ -1915,9 +1926,6 @@ def render_answer_button_card():
 
 def render_flashcard_section():
 
-    st.markdown("---")
-    st.subheader("母音フラッシュカード")
-
     with st.container(border=True):
 
         flash_rl_nm = {
@@ -1935,11 +1943,7 @@ def render_flashcard_section():
             index=2,
             key="flash_rule"
         )
-
         flash_rl = flash_rl_nm[flash_rl_lb]
-
-        # 羅列削除はシステムとして常時ON。
-        # 画面上のチェックボックスは表示しない。
         flash_us12 = True
 
         output_mode = st.radio(
@@ -1949,19 +1953,6 @@ def render_flashcard_section():
             index=0,
             key="flash_output_mode"
         )
-
-        flash_dic, flash_ct, _, _, _ = ld_flash_dic(
-            flash_rl,
-            flash_us12
-        )
-
-        available_lengths = [
-            len(key)
-            for key, entries in flash_dic.items()
-            if len(entries) >= 2 and key
-        ]
-        max_flash_len = max(available_lengths, default=4)
-        default_flash_len = min(4, max_flash_len)
 
         st.markdown("**文字数を指定**")
         length_mode = st.radio(
@@ -1974,27 +1965,12 @@ def render_flashcard_section():
         target_len = int(st.number_input(
             "文字数を指定",
             min_value=1,
-            max_value=max_flash_len,
-            value=default_flash_len,
+            max_value=100,
+            value=4,
             step=1,
             key="flash_len_number",
             label_visibility="collapsed"
         ))
-
-        candidates = get_flash_candidates(
-            flash_dic,
-            target_len,
-            length_mode,
-        )
-
-        flash_len_label = (
-            f"{target_len}文字以上"
-            if length_mode == "以上"
-            else f"{target_len}文字"
-        )
-        st.caption(
-            f"条件: {flash_len_label} / 対象母音数: {len(candidates):,} / 登録単語数: {flash_ct:,}"
-        )
 
         init_values = {
             "flash_card_key": "",
@@ -2011,8 +1987,10 @@ def render_flashcard_section():
             "flash_card_anim": False,
             "flash_card_slide_dir": "right",
             "flash_card_history": [],
+            "flash_card_candidate_count": None,
+            "flash_card_word_count": None,
+            "flash_card_no_candidates": False,
         }
-
         for k, v in init_values.items():
             if k not in st.session_state:
                 st.session_state[k] = v
@@ -2024,7 +2002,6 @@ def render_flashcard_section():
             or st.session_state.flash_card_us12 != flash_us12
             or st.session_state.flash_card_output_mode != output_mode
         )
-
         if changed_cond:
             st.session_state.flash_card_key = ""
             st.session_state.flash_card_words = []
@@ -2039,18 +2016,35 @@ def render_flashcard_section():
             st.session_state.flash_card_previous_display = ""
             st.session_state.flash_card_anim = False
             st.session_state.flash_card_slide_dir = "right"
+            st.session_state.flash_card_candidate_count = None
+            st.session_state.flash_card_word_count = None
+            st.session_state.flash_card_no_candidates = False
+
+        flash_len_label = (
+            f"{target_len}文字以上" if length_mode == "以上" else f"{target_len}文字"
+        )
+        candidate_count = st.session_state.get("flash_card_candidate_count")
+        word_count = st.session_state.get("flash_card_word_count")
+        if candidate_count is None:
+            st.caption(f"条件: {flash_len_label} / 『めくる』時に対象を読み込みます。")
+        else:
+            st.caption(
+                f"条件: {flash_len_label} / 対象母音数: {candidate_count:,} / 登録単語数: {word_count or 0:,}"
+            )
 
         left_col, hist_col = st.columns([3.1, 1.25], gap="large")
-
         with left_col:
-
             if st.button("めくる", key="flash_flip"):
+                flash_dic, flash_ct, _, _, _ = ld_flash_dic(flash_rl, flash_us12)
+                candidates = get_flash_candidates(flash_dic, target_len, length_mode)
+                st.session_state.flash_card_candidate_count = len(candidates)
+                st.session_state.flash_card_word_count = flash_ct
 
                 if candidates:
+                    st.session_state.flash_card_no_candidates = False
                     selected_key = random.choice(candidates)
                     selected_entries = flash_dic[selected_key]
                     selected_words = [item[0] for item in selected_entries]
-
                     st.session_state.flash_card_previous_display = st.session_state.flash_card_display
                     st.session_state.flash_card_anim = bool(st.session_state.flash_card_display)
                     st.session_state.flash_card_slide_dir = random.choice(["left", "right"])
@@ -2058,64 +2052,48 @@ def render_flashcard_section():
                     st.session_state.flash_card_words = selected_words
                     st.session_state.flash_card_entries = selected_entries
                     st.session_state.flash_card_answer = False
-
                     if output_mode == "単語で出力":
                         st.session_state.flash_card_display = random.choice(selected_words)
                     else:
                         st.session_state.flash_card_display = selected_key
-
                     new_hist = make_history_item(
-                        st.session_state.flash_card_display,
-                        selected_key,
-                        selected_entries,
-                        output_mode,
+                        st.session_state.flash_card_display, selected_key, selected_entries, output_mode
                     )
                     st.session_state.flash_card_history = (
                         [new_hist] + st.session_state.flash_card_history
                     )[:5]
-
                 else:
-                    st.session_state.flash_card_previous_display = st.session_state.flash_card_display
-                    st.session_state.flash_card_anim = bool(st.session_state.flash_card_display)
-                    st.session_state.flash_card_slide_dir = random.choice(["left", "right"])
+                    st.session_state.flash_card_no_candidates = True
                     st.session_state.flash_card_key = ""
                     st.session_state.flash_card_words = []
                     st.session_state.flash_card_entries = []
                     st.session_state.flash_card_answer = False
                     st.session_state.flash_card_display = ""
 
-            if candidates:
-
-                if st.session_state.flash_card_key:
-
-                    render_flash_html(
-                        st.session_state.flash_card_display,
-                        output_mode,
-                        previous_text=st.session_state.flash_card_previous_display,
-                        answer_entries=st.session_state.flash_card_entries,
-                        answer_key=st.session_state.flash_card_key,
-                        show_answer=st.session_state.flash_card_answer,
-                        animate=st.session_state.flash_card_anim and not st.session_state.flash_card_answer,
-                        slide_dir=st.session_state.flash_card_slide_dir,
-                    )
-
-                    if not st.session_state.flash_card_answer:
-                        render_answer_button_card()
-                        if st.button(
-                            "答えを出す",
-                            key="flash_show_answer_big",
-                            use_container_width=True,
-                        ):
-                            st.session_state.flash_card_answer = True
-                            st.session_state.flash_card_anim = False
-                            st.session_state.flash_card_previous_display = ""
-                            st.rerun()
-
-                else:
-                    st.info("めくるボタンを押してください。")
-
-            else:
+            if st.session_state.get("flash_card_no_candidates"):
                 st.warning("この条件に合う、2語以上ある母音がありません。")
+            elif st.session_state.flash_card_key:
+                render_flash_html(
+                    st.session_state.flash_card_display,
+                    output_mode,
+                    previous_text=st.session_state.flash_card_previous_display,
+                    answer_entries=st.session_state.flash_card_entries,
+                    answer_key=st.session_state.flash_card_key,
+                    show_answer=st.session_state.flash_card_answer,
+                    animate=st.session_state.flash_card_anim and not st.session_state.flash_card_answer,
+                    slide_dir=st.session_state.flash_card_slide_dir,
+                )
+                if not st.session_state.flash_card_answer:
+                    render_answer_button_card()
+                    if st.button(
+                        "答えを出す", key="flash_show_answer_big", use_container_width=True
+                    ):
+                        st.session_state.flash_card_answer = True
+                        st.session_state.flash_card_anim = False
+                        st.session_state.flash_card_previous_display = ""
+                        st.rerun()
+            else:
+                st.info("めくるボタンを押してください。")
 
         with hist_col:
             render_flash_history(st.session_state.flash_card_history)
@@ -2258,13 +2236,41 @@ def render_rhyme_finder_section():
         end = min(start + page_size, len(groups))
         page_groups = groups[start:end]
 
-        lines = []
+        # 母音（検索キー）の行だけ色を変えて見分けやすくする。
+        # 40グループ分を1つのHTMLにまとめ、Streamlit部品数は増やさない。
+        rhyme_parts = [
+            '<div class="rhyme-list">'
+        ]
         for key, words in page_groups:
-            lines.append(f"ー{key}ー")
-            lines.extend(words)
-            lines.append("")
+            rhyme_parts.append(
+                f'<div class="rhyme-key">ー{html.escape(key)}ー</div>'
+            )
+            for word in words:
+                rhyme_parts.append(
+                    f'<div class="rhyme-word">{html.escape(word)}</div>'
+                )
+            rhyme_parts.append('<div class="rhyme-gap"></div>')
 
-        st.code("\n".join(lines), language=None)
+        rhyme_parts.append('</div>')
+        rhyme_parts.append(
+            """
+            <style>
+            .rhyme-list{
+                border:1px solid rgba(49,51,63,.2);
+                border-radius:.5rem;
+                padding:.8rem 1rem;
+                background:rgb(250,250,250);
+                font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+                font-size:.95rem;
+                line-height:1.35;
+            }
+            .rhyme-key{color:#18a66a;font-weight:800;}
+            .rhyme-word{color:#111;}
+            .rhyme-gap{height:.7rem;}
+            </style>
+            """
+        )
+        st.markdown("".join(rhyme_parts), unsafe_allow_html=True)
         st.caption(
             f"{start + 1:,}〜{end:,}グループ目 / 全{len(groups):,}グループ "
             f"（{page}/{total_pages}ページ）"
@@ -2434,10 +2440,26 @@ def render_memory_game_section():
         mem_us12 = True
 
         if "memory_cards" not in st.session_state:
-            start_memory_game(mem_rl_lb, mem_rl, mem_us12)
+            st.session_state.memory_cards = []
+            st.session_state.memory_matched = []
+            st.session_state.memory_selected = []
+            st.session_state.memory_moves = 0
+            st.session_state.memory_found = 0
+            st.session_state.memory_rule = mem_rl_lb
+            st.session_state.memory_candidate_count = 0
+            st.session_state.memory_word_count = 0
+            st.session_state.memory_message = ""
 
         if st.session_state.get("memory_rule") != mem_rl_lb:
-            start_memory_game(mem_rl_lb, mem_rl, mem_us12)
+            st.session_state.memory_cards = []
+            st.session_state.memory_matched = []
+            st.session_state.memory_selected = []
+            st.session_state.memory_moves = 0
+            st.session_state.memory_found = 0
+            st.session_state.memory_rule = mem_rl_lb
+            st.session_state.memory_candidate_count = 0
+            st.session_state.memory_word_count = 0
+            st.session_state.memory_message = ""
 
         top_cols = st.columns([1, 1, 1], gap="small")
         with top_cols[0]:
@@ -2456,7 +2478,10 @@ def render_memory_game_section():
         cards = st.session_state.get("memory_cards", [])
 
         if not cards:
-            st.warning("この条件では、ペアを6組作れる検索キーが足りません。")
+            if st.session_state.get("memory_word_count", 0) == 0:
+                st.info("『新しいゲーム』を押すとカードを読み込みます。")
+            else:
+                st.warning("この条件では、ペアを6組作れる検索キーが足りません。")
             return
 
         msg = st.session_state.get("memory_message", "")
@@ -2814,7 +2839,8 @@ if qu:
 
     res = collect_search_results(vw_dic, key, query_pre_rep, hard_index)
 
-    st.write("検索キー:", key)
+    display_key = get_actual_search_display_key(key, query_pre_rep)
+    st.write("検索キー:", display_key)
     st.write("一致件数:", len(res))
 
     if res:
@@ -2829,32 +2855,32 @@ with st.expander("変換テスト"):
     t = st.text_input("テスト文字列", key="test")
     if t:
         st.write("かな:", knf(t))
+        test_word_final = ext(t, rl, us12)
+        test_word_pre = ext_pre_rep(t, rl)
+        test_vowel_final = ext_vw_rule(t, rl, us12)
+        test_vowel_pre = ext_vw_pre_rep(t, rl)
+
         st.write(
             "単語検索キー:",
-            ext(
-                t,
-                rl,
-                us12
-            )
+            get_actual_search_display_key(test_word_final, test_word_pre)
         )
-        st.write("羅列削除前キー:", ext_pre_rep(t, rl))
-        st.write("母音検索キー:", ext_vw_rule(t, rl, us12))
-        st.write("母音検索・羅列削除前キー:", ext_vw_pre_rep(t, rl))
+        st.write(
+            "母音検索キー:",
+            get_actual_search_display_key(test_vowel_final, test_vowel_pre)
+        )
 
 
-render_flashcard_section()
-render_toggleable_section(
-    "韻探し",
-    "rhyme_finder_section_open",
-    "toggle_rhyme_finder_section",
-    render_rhyme_finder_section,
-)
-render_toggleable_section(
-    "単語神経衰弱",
-    "memory_game_section_open",
-    "toggle_memory_game_section",
-    render_memory_game_section,
-)
+st.markdown("---")
+with st.expander("韻探し", expanded=True):
+    render_rhyme_finder_section()
+
+st.markdown("---")
+with st.expander("母音フラッシュカード", expanded=False):
+    render_flashcard_section()
+
+st.markdown("---")
+with st.expander("単語神経衰弱", expanded=False):
+    render_memory_game_section()
 
 with st.expander("未読漢字チェック"):
 
