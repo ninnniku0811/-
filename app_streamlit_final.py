@@ -2942,6 +2942,25 @@ def render_word_add_section():
         user_words = read_user_words_only()
         st.caption(f"アプリ追加単語: {len(user_words):,}語（user_words.txt）")
 
+        if user_words:
+            st.markdown("**追加した単語をまとめてコピー**")
+            copy_text = "\n".join(user_words)
+            copy_html = (
+                '<div class="user-words-copy-box">'
+                '<button class="user-words-copy-btn" onclick="const t=this.parentElement.querySelector(\'.user-words-copy-text\'); navigator.clipboard.writeText(t.value).then(() => { this.innerText=\'コピー済み\'; setTimeout(() => this.innerText=\'まとめてコピー\', 1200); });">まとめてコピー</button>'
+                f'<textarea class="user-words-copy-text" readonly>{html.escape(copy_text)}</textarea>'
+                '</div>'
+                '<style>'
+                '.user-words-copy-box{position:relative;margin:.2rem 0 .7rem 0;}'
+                '.user-words-copy-btn{margin-bottom:.45rem;border:1px solid rgba(49,51,63,.25);border-radius:.45rem;background:white;padding:.35rem .75rem;cursor:pointer;font-size:.9rem;font-weight:700;}'
+                '.user-words-copy-btn:hover{background:rgb(240,242,246);}'
+                '.user-words-copy-text{width:100%;height:150px;box-sizing:border-box;border:1px solid rgba(49,51,63,.2);border-radius:.45rem;padding:.55rem .65rem;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;font-size:.88rem;line-height:1.35;background:#fff;color:#111;}'
+                '</style>'
+            )
+            components.html(copy_html, height=230, scrolling=False)
+        else:
+            st.caption("まとめてコピーできるアプリ追加単語はありません。")
+
         st.markdown("---")
         st.markdown("**追加の取り消し・削除**")
         st.caption("ここで削除するのは user_words.txt の単語だけです。words.txt 本体は変更しません。")
