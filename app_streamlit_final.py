@@ -12,7 +12,7 @@ from kanjize import number2kanji
 import streamlit as st
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="母音検索システム", layout="wide")
+st.set_page_config(page_title="韻探し", layout="wide")
 
 # 更新: 追加データをアプリ外の固定保存先へ永続化・旧データ自動移行 / 追加履歴・取り消し・個別削除 / 韻探し優先UI / expander開閉 / 羅列削除時の検索キー表示統一 / 韻キー色分け / TXT一括追加
 
@@ -3096,7 +3096,6 @@ def render_toggleable_section(title, state_key, button_key, renderer):
 # ===========================
 
 
-st.title("母音検索システム")
 
 rl_nm = {
     "ばりかた": 0,
