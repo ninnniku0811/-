@@ -29,6 +29,80 @@ tagger = Tagger()
 def attr_text(text):
     return html.escape(text or "", quote=True)
 
+
+def install_scroll_guard():
+    """Streamlit再実行時の意図しないスクロールジャンプを抑える。"""
+
+    components.html(
+        r"""
+        <script>
+        (() => {
+          try {
+            const p = window.parent;
+            const KEY = "in_sagashi_scroll_y_v2";
+
+            // DOMの高さが変わった時にブラウザが勝手にスクロール位置を
+            // 補正する scroll anchoring を、アプリ全体で無効にする。
+            const doc = p.document;
+            if (doc && !doc.getElementById("in-sagashi-scroll-guard-style")) {
+              const style = doc.createElement("style");
+              style.id = "in-sagashi-scroll-guard-style";
+              style.textContent = `
+                html, body, [data-testid="stAppViewContainer"],
+                [data-testid="stMain"], section.main {
+                  overflow-anchor: none !important;
+                }
+              `;
+              doc.head.appendChild(style);
+            }
+
+            // Streamlitのrerunをまたいで現在位置をsessionStorageへ保存する。
+            if (!p.__inSagashiScrollGuardInstalled) {
+              p.__inSagashiScrollGuardInstalled = true;
+              let ticking = false;
+              p.addEventListener("scroll", () => {
+                if (ticking) return;
+                ticking = true;
+                p.requestAnimationFrame(() => {
+                  try {
+                    p.sessionStorage.setItem(KEY, String(p.scrollY || p.pageYOffset || 0));
+                  } catch (_) {}
+                  ticking = false;
+                });
+              }, { passive: true });
+            }
+
+            const saved = p.sessionStorage.getItem(KEY);
+            if (saved !== null) {
+              const y = Number(saved);
+              if (Number.isFinite(y)) {
+                const restore = () => {
+                  try {
+                    const now = p.scrollY || p.pageYOffset || 0;
+                    if (Math.abs(now - y) > 2) {
+                      p.scrollTo(0, y);
+                    }
+                  } catch (_) {}
+                };
+
+                // Streamlitが結果やiframeの高さを確定するタイミングが端末ごとに
+                // 違うため、数回だけ同じ位置へ戻す。
+                p.requestAnimationFrame(() => {
+                  restore();
+                  p.setTimeout(restore, 60);
+                  p.setTimeout(restore, 180);
+                  p.setTimeout(restore, 420);
+                });
+              }
+            }
+          } catch (_) {}
+        })();
+        </script>
+        """,
+        height=0,
+        scrolling=False,
+    )
+
 def cv_num(text):
 
     def repl(m):
@@ -2885,6 +2959,83 @@ def save_word_add_result(raw_text, source_label="入力"):
     st.rerun()
 
 
+@st.dialog("本当に削除しますか？")
+def confirm_history_delete(entry_id, description):
+    st.warning(description)
+    st.caption("削除するのはアプリから追加した単語だけです。words.txt 本体は変更しません。")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("キャンセル", key=f"cancel_history_delete_{entry_id}", use_container_width=True):
+            st.rerun()
+    with c2:
+        if st.button(
+            "削除する",
+            key=f"confirm_history_delete_{entry_id}",
+            type="primary",
+            use_container_width=True,
+        ):
+            try:
+                removed = undo_history_entry(entry_id)
+                st.cache_data.clear()
+                if removed:
+                    st.session_state.word_add_notice = (
+                        "success",
+                        f"{len(removed)}語を削除しました。"
+                    )
+                else:
+                    st.session_state.word_add_notice = (
+                        "info",
+                        "削除対象の単語は現在 user_words.txt に残っていません。"
+                    )
+                st.rerun()
+            except OSError as e:
+                st.error(f"削除に失敗しました: {e}")
+
+
+@st.dialog("本当に削除しますか？")
+def confirm_individual_word_delete(words):
+    words = list(words)
+    if not words:
+        st.info("削除する単語が選択されていません。")
+        return
+
+    st.warning(f"選択した {len(words)}語を削除します。")
+    preview = "\n".join(words[:30])
+    if len(words) > 30:
+        preview += f"\n…ほか {len(words) - 30}語"
+    st.code(preview)
+    st.caption("削除するのは user_words.txt の単語だけです。words.txt 本体は変更しません。")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("キャンセル", key="cancel_individual_word_delete", use_container_width=True):
+            st.rerun()
+    with c2:
+        if st.button(
+            "削除する",
+            key="confirm_individual_word_delete",
+            type="primary",
+            use_container_width=True,
+        ):
+            try:
+                removed = remove_user_words(words)
+                st.cache_data.clear()
+                if removed:
+                    st.session_state.word_add_notice = (
+                        "success",
+                        f"{len(removed)}語を user_words.txt から削除しました。"
+                    )
+                else:
+                    st.session_state.word_add_notice = (
+                        "info",
+                        "削除対象の単語は見つかりませんでした。"
+                    )
+                st.rerun()
+            except OSError as e:
+                st.error(f"単語の削除に失敗しました: {e}")
+
+
 def render_word_add_section():
     with st.expander("単語を追加・管理", expanded=False):
         st.caption(
@@ -2976,22 +3127,10 @@ def render_word_add_section():
                 f"直前の追加: {latest_time} / {latest_source} / 残り {len(latest_remaining):,}語"
             )
             if st.button("直前の追加を取り消す", key="undo_latest_word_add", use_container_width=True):
-                try:
-                    removed = undo_history_entry(latest.get("id", ""))
-                    st.cache_data.clear()
-                    if removed:
-                        st.session_state.word_add_notice = (
-                            "success",
-                            f"直前の追加から {len(removed)}語を削除しました。"
-                        )
-                    else:
-                        st.session_state.word_add_notice = (
-                            "info",
-                            "直前の追加に、現在 user_words.txt に残っている単語はありません。"
-                        )
-                    st.rerun()
-                except OSError as e:
-                    st.error(f"取り消しに失敗しました: {e}")
+                confirm_history_delete(
+                    latest.get("id", ""),
+                    f"直前の追加（{latest_source}）から、現在残っている {len(latest_remaining)}語を削除します。",
+                )
         else:
             st.caption("取り消せる追加履歴はありません。")
 
@@ -3029,22 +3168,10 @@ def render_word_add_section():
                 st.code("\n".join(selected_remaining))
 
             if st.button("この追加をまとめて取り消す", key="undo_selected_word_add", use_container_width=True):
-                try:
-                    removed = undo_history_entry(selected_entry.get("id", ""))
-                    st.cache_data.clear()
-                    if removed:
-                        st.session_state.word_add_notice = (
-                            "success",
-                            f"選択した追加から {len(removed)}語を削除しました。"
-                        )
-                    else:
-                        st.session_state.word_add_notice = (
-                            "info",
-                            "この追加に、現在 user_words.txt に残っている単語はありません。"
-                        )
-                    st.rerun()
-                except OSError as e:
-                    st.error(f"取り消しに失敗しました: {e}")
+                confirm_history_delete(
+                    selected_entry.get("id", ""),
+                    f"選択した追加履歴から、現在残っている {len(selected_remaining)}語を削除します。",
+                )
 
         user_words = read_user_words_only()
         if user_words:
@@ -3061,22 +3188,7 @@ def render_word_add_section():
                 use_container_width=True,
                 disabled=not selected_delete_words,
             ):
-                try:
-                    removed = remove_user_words(selected_delete_words)
-                    st.cache_data.clear()
-                    if removed:
-                        st.session_state.word_add_notice = (
-                            "success",
-                            f"{len(removed)}語を user_words.txt から削除しました。"
-                        )
-                    else:
-                        st.session_state.word_add_notice = (
-                            "info",
-                            "削除対象の単語は見つかりませんでした。"
-                        )
-                    st.rerun()
-                except OSError as e:
-                    st.error(f"単語の削除に失敗しました: {e}")
+                confirm_individual_word_delete(tuple(selected_delete_words))
         else:
             st.caption("個別削除できるアプリ追加単語はありません。")
 
@@ -3114,7 +3226,8 @@ def render_toggleable_section(title, state_key, button_key, renderer):
 # GUI
 # ===========================
 
-
+# 検索結果や開閉UIの再描画で、特にスマホがページ下部へ勝手に飛ぶのを防ぐ。
+install_scroll_guard()
 
 rl_nm = {
     "ばりかた": 0,
@@ -3170,8 +3283,6 @@ st.caption(
     f"7字以上: {length_counts['7以上']:,})"
 )
 
-render_word_add_section()
-
 qu = st.text_input("検索語")
 
 if qu:
@@ -3217,6 +3328,9 @@ if qu:
 
     else:
         st.info("一致する単語はありません。")
+
+# 単語追加・管理は検索機能の直下に置く。
+render_word_add_section()
 
 with st.expander("変換テスト"):
     t = st.text_input("テスト文字列", key="test")
