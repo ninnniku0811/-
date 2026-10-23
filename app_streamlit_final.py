@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="母音検索システム", layout="wide")
 
-# 更新: あ段+い保持 / フラッシュカード自由文字数＋以上指定 / ばりかた探し追加＋以上指定
+# 更新: あ段+い保持 / フラッシュカード自由文字数＋以上指定 / 韻パターン探し（全ルール対応） / アプリ内単語追加
 
 
 def render_flying_words_background():
@@ -2097,26 +2097,39 @@ def render_flashcard_section():
 
 
 # ===========================
-# ばりかた探し
+# 韻パターン探し
 # ===========================
 
 @st.cache_data
-def ld_barikata_finder_index(words_mtime):
+def ld_rhyme_finder_index(rl, words_mtime):
     """
-    ばりかた(rl=0)の韻グループを文字数別に一度だけ索引化する。
-    words.txt の更新時刻を引数にすることで、辞書更新時はキャッシュを自動更新する。
+    選択した変換ルールの韻グループを文字数別に索引化する。
+    rl と words.txt の更新時刻をキャッシュキーに含めることで、
+    必要なルールだけを作成し、辞書更新時は自動で再構築する。
     """
 
-    vowel_dict, word_count, _, _, _ = bud_dic(0, True)
+    vowel_dict, word_count, _, _, _ = bud_dic(rl, True)
     groups_by_length = {}
 
     for key, entries in vowel_dict.items():
-        # 「韻」として並べるため、同じキーに2語以上あるものだけ対象にする。
+        # 「韻」として並べるため、同じ検索キーに2語以上あるものだけ対象にする。
         if not key or len(entries) < 2:
             continue
 
-        words = tuple(item[0] for item in entries)
-        groups_by_length.setdefault(len(key), []).append((key, words))
+        # 同一単語が重複しないようにしつつ、辞書側の並び順は維持する。
+        words = []
+        seen = set()
+        for item in entries:
+            word = item[0]
+            if word in seen:
+                continue
+            seen.add(word)
+            words.append(word)
+
+        if len(words) < 2:
+            continue
+
+        groups_by_length.setdefault(len(key), []).append((key, tuple(words)))
 
     for length in groups_by_length:
         groups_by_length[length].sort(key=lambda x: x[0])
@@ -2124,43 +2137,64 @@ def ld_barikata_finder_index(words_mtime):
     return groups_by_length, word_count
 
 
-def render_barikata_finder_section():
+def render_rhyme_finder_section():
 
     st.markdown("---")
-    st.subheader("ばりかた探し")
+    st.subheader("韻パターン探し")
 
     with st.container(border=True):
         st.caption(
-            "指定した文字数の『ばりかた』の韻を一覧表示します。"
-            "動作を軽くするため、初回だけ索引を作り、40グループずつ表示します。"
+            "変換ルールと文字数を指定すると、その条件で同じ検索キーになる韻を一覧表示します。"
+            "動作を軽くするため、選んだルールだけ索引を作ってキャッシュし、40グループずつ表示します。"
         )
 
+        finder_rules = {
+            "ばりかた": 0,
+            "かため": 1,
+            "ふつう": 2,
+            "やわめ": 3,
+            "音節分け": 4,
+        }
+
+        finder_rule_label = st.radio(
+            "探す変換ルール",
+            list(finder_rules.keys()),
+            horizontal=True,
+            index=0,
+            key="rhyme_finder_rule",
+        )
+        finder_rl = finder_rules[finder_rule_label]
+
         length_mode = st.radio(
-            "ばりかたの文字数条件",
+            "文字数条件",
             ["ちょうど", "以上"],
             horizontal=True,
             index=0,
-            key="barikata_finder_len_mode",
+            key="rhyme_finder_len_mode",
         )
 
         target_len = int(st.number_input(
-            "ばりかたの文字数",
+            "検索キーの文字数",
             min_value=1,
             max_value=100,
             value=4,
             step=1,
-            key="barikata_finder_len",
+            key="rhyme_finder_len",
         ))
 
-        if st.button("この条件を表示", key="barikata_finder_show"):
-            st.session_state.barikata_finder_active_len = target_len
-            st.session_state.barikata_finder_active_mode = length_mode
+        if st.button("この条件を表示", key="rhyme_finder_show"):
+            st.session_state.rhyme_finder_active_rule_label = finder_rule_label
+            st.session_state.rhyme_finder_active_rl = finder_rl
+            st.session_state.rhyme_finder_active_len = target_len
+            st.session_state.rhyme_finder_active_mode = length_mode
 
-        active_len = st.session_state.get("barikata_finder_active_len")
-        active_mode = st.session_state.get("barikata_finder_active_mode", "ちょうど")
+        active_rule_label = st.session_state.get("rhyme_finder_active_rule_label")
+        active_rl = st.session_state.get("rhyme_finder_active_rl")
+        active_len = st.session_state.get("rhyme_finder_active_len")
+        active_mode = st.session_state.get("rhyme_finder_active_mode", "ちょうど")
 
-        if active_len is None:
-            st.info("文字数と条件を指定して『この条件を表示』を押してください。")
+        if active_rl is None or active_len is None:
+            st.info("変換ルール・文字数・条件を指定して『この条件を表示』を押してください。")
             return
 
         try:
@@ -2168,7 +2202,7 @@ def render_barikata_finder_section():
         except OSError:
             words_mtime = 0
 
-        groups_by_length, word_count = ld_barikata_finder_index(words_mtime)
+        groups_by_length, word_count = ld_rhyme_finder_index(active_rl, words_mtime)
 
         if active_mode == "以上":
             groups = []
@@ -2181,14 +2215,16 @@ def render_barikata_finder_section():
             active_label = f"{active_len}文字"
 
         st.caption(
-            f"{active_label} / 韻グループ数: {len(groups):,} / 登録単語数: {word_count:,}"
+            f"{active_rule_label} / {active_label} / "
+            f"韻グループ数: {len(groups):,} / 登録単語数: {word_count:,}"
         )
 
         if not groups:
-            st.info("この条件には、2語以上ある『ばりかた』の韻がありません。")
+            st.info(f"この条件には、2語以上ある『{active_rule_label}』の韻がありません。")
             return
 
-        # 一度に大量のStreamlit部品を作ると重くなるため、文字列1ブロックにまとめてページ分割する。
+        # 一度に大量のStreamlit部品を作ると重くなるため、
+        # 文字列1ブロックにまとめてページ分割する。
         page_size = 40
         total_pages = (len(groups) + page_size - 1) // page_size
         page = int(st.number_input(
@@ -2197,7 +2233,7 @@ def render_barikata_finder_section():
             max_value=total_pages,
             value=1,
             step=1,
-            key=f"barikata_finder_page_{active_mode}_{active_len}",
+            key=f"rhyme_finder_page_{active_rl}_{active_mode}_{active_len}",
         ))
 
         start = (page - 1) * page_size
@@ -2460,6 +2496,136 @@ def render_memory_game_section():
                 st.write(" / ".join(words))
 
 # ===========================
+# アプリ上から words.txt に単語追加
+# ===========================
+
+def append_words_to_dictionary(raw_text):
+    """
+    入力された単語を words.txt に追記する。
+    - 1行1語
+    - 空行と # で始まる行は無視
+    - words.txt 内の既存語と、今回入力内の重複を除外
+    戻り値: (追加語リスト, 重複語リスト, 無視件数)
+    """
+
+    requested = []
+    seen_input = set()
+    duplicate_input = []
+    ignored_count = 0
+
+    for line in (raw_text or "").splitlines():
+        word = line.strip()
+
+        if not word or word.startswith("#"):
+            ignored_count += 1
+            continue
+
+        if word in seen_input:
+            duplicate_input.append(word)
+            continue
+
+        seen_input.add(word)
+        requested.append(word)
+
+    if not requested:
+        return [], duplicate_input, ignored_count
+
+    existing_words = set()
+    try:
+        with open(wd_fl, encoding="utf-8") as f:
+            for line in f:
+                word = line.strip()
+                if word and not word.startswith("#"):
+                    existing_words.add(word)
+    except FileNotFoundError:
+        pass
+
+    new_words = []
+    duplicate_words = list(duplicate_input)
+
+    for word in requested:
+        if word in existing_words:
+            duplicate_words.append(word)
+        else:
+            new_words.append(word)
+            existing_words.add(word)
+
+    if new_words:
+        # 既存ファイルの末尾に改行がない場合だけ補う。
+        needs_newline = False
+        try:
+            with open(wd_fl, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                if size > 0:
+                    f.seek(-1, os.SEEK_END)
+                    needs_newline = f.read(1) not in (b"\n", b"\r")
+        except FileNotFoundError:
+            pass
+
+        with open(wd_fl, "a", encoding="utf-8", newline="") as f:
+            if needs_newline:
+                f.write("\n")
+            f.write("\n".join(new_words))
+            f.write("\n")
+
+    return new_words, duplicate_words, ignored_count
+
+
+def render_word_add_section():
+    with st.expander("単語を追加", expanded=False):
+        st.caption(
+            "words.txt に直接追加します。1行に1語ずつ入力してください。"
+            "同じ単語がすでに登録されている場合は自動で追加を省きます。"
+        )
+
+        notice = st.session_state.pop("word_add_notice", None)
+        if notice:
+            kind, message = notice
+            if kind == "success":
+                st.success(message)
+            elif kind == "warning":
+                st.warning(message)
+            else:
+                st.info(message)
+
+        with st.form("word_add_form", clear_on_submit=True):
+            raw_words = st.text_area(
+                "追加する単語",
+                placeholder="例：\nリトル・マーメイド\n高速道路\n宇宙空間",
+                height=150,
+            )
+            submitted = st.form_submit_button("words.txt に追加", use_container_width=True)
+
+        if submitted:
+            try:
+                added, duplicates, ignored_count = append_words_to_dictionary(raw_words)
+            except OSError as e:
+                st.error(f"words.txt に書き込めませんでした: {e}")
+                return
+
+            # 辞書・フラッシュカード・韻パターン探し等のキャッシュを全て更新する。
+            st.cache_data.clear()
+
+            if added:
+                message = f"{len(added)}語を追加しました。"
+                if duplicates:
+                    message += f" 重複 {len(duplicates)}語は追加していません。"
+                if ignored_count:
+                    message += f" 空行・コメント {ignored_count}行を無視しました。"
+                st.session_state.word_add_notice = ("success", message)
+            elif duplicates:
+                message = f"追加された単語はありません。{len(duplicates)}語はすでに登録済みまたは入力内で重複しています。"
+                if ignored_count:
+                    message += f" 空行・コメント {ignored_count}行を無視しました。"
+                st.session_state.word_add_notice = ("info", message)
+            else:
+                st.session_state.word_add_notice = ("warning", "追加できる単語が入力されていません。")
+
+            # この実行時点では vw_dic が追加前の内容なので、即時反映のため再実行する。
+            st.rerun()
+
+# ===========================
 # GUI
 # ===========================
 
@@ -2519,6 +2685,8 @@ st.caption(
     f"6字: {length_counts['6']:,}　 "
     f"7字以上: {length_counts['7以上']:,})"
 )
+
+render_word_add_section()
 
 qu = st.text_input("検索語")
 
@@ -2583,7 +2751,7 @@ with st.expander("変換テスト"):
 
 
 render_flashcard_section()
-render_barikata_finder_section()
+render_rhyme_finder_section()
 render_memory_game_section()
 
 with st.expander("未読漢字チェック"):
