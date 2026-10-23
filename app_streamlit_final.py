@@ -4,6 +4,7 @@ import html
 import json
 import random
 import unicodedata
+from datetime import datetime
 
 from fugashi import Tagger
 from kanjize import number2kanji
@@ -13,7 +14,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="母音検索システム", layout="wide")
 
-# 更新: 韻探し優先UI / expander開閉 / 羅列削除時の検索キー表示統一 / 韻キー色分け / user_words.txt分離保存 / TXT一括追加
+# 更新: 追加データをアプリ外の固定保存先へ永続化・旧データ自動移行 / 追加履歴・取り消し・個別削除 / 韻探し優先UI / expander開閉 / 羅列削除時の検索キー表示統一 / 韻キー色分け / TXT一括追加
 
 
 def render_flying_words_background():
@@ -1074,7 +1075,94 @@ def add_length_count(length_counts, key):
 
 fd = os.path.dirname(os.path.abspath(__file__))
 wd_fl = os.path.join(fd, "words.txt")
-user_wd_fl = os.path.join(fd, "user_words.txt")
+
+# アプリ更新で追加単語が消えないよう、ユーザー追加データは
+# アプリ本体とは別の固定フォルダへ保存する。
+# 必要なら環境変数 BOIN_SEARCH_DATA_DIR で保存先を変更できる。
+_data_dir_env = os.environ.get("BOIN_SEARCH_DATA_DIR", "").strip()
+if _data_dir_env:
+    user_data_dir = os.path.abspath(os.path.expanduser(_data_dir_env))
+else:
+    user_data_dir = os.path.join(os.path.expanduser("~"), ".boin_search_data")
+
+os.makedirs(user_data_dir, exist_ok=True)
+
+user_wd_fl = os.path.join(user_data_dir, "user_words.txt")
+user_history_fl = os.path.join(user_data_dir, "user_words_history.json")
+
+# 旧版ではアプリと同じフォルダに保存していたため、
+# 初回だけ旧データを固定保存先へ自動移行する。
+legacy_user_wd_fl = os.path.join(fd, "user_words.txt")
+legacy_user_history_fl = os.path.join(fd, "user_words_history.json")
+legacy_migration_marker = os.path.join(user_data_dir, ".legacy_migrated_v1")
+
+
+def migrate_legacy_user_data():
+    # 旧フォルダからの移行は一度だけ。
+    # 毎回統合すると、あとで削除した単語が旧ファイルから復活してしまうため。
+    if os.path.exists(legacy_migration_marker):
+        return
+    # --- user_words.txt を重複なしで統合 ---
+    merged_words = []
+    seen_words = set()
+
+    for path in (user_wd_fl, legacy_user_wd_fl):
+        if os.path.abspath(path) == os.path.abspath(user_wd_fl) and path == legacy_user_wd_fl:
+            continue
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                for line in f:
+                    word = line.strip()
+                    if not word or word.startswith("#") or word in seen_words:
+                        continue
+                    seen_words.add(word)
+                    merged_words.append(word)
+        except FileNotFoundError:
+            pass
+
+    if merged_words:
+        tmp = user_wd_fl + ".migrate.tmp"
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write("\n".join(merged_words) + "\n")
+        os.replace(tmp, user_wd_fl)
+
+    # --- 履歴JSONもID重複なしで統合 ---
+    merged_history = []
+    seen_ids = set()
+
+    for path in (user_history_fl, legacy_user_history_fl):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            continue
+
+        if not isinstance(data, list):
+            continue
+
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            entry_id = str(entry.get("id", ""))
+            # IDがない古い履歴は内容をそのまま残すため仮IDで重複判定。
+            dedupe_key = entry_id or json.dumps(entry, ensure_ascii=False, sort_keys=True)
+            if dedupe_key in seen_ids:
+                continue
+            seen_ids.add(dedupe_key)
+            merged_history.append(entry)
+
+    if merged_history:
+        tmp = user_history_fl + ".migrate.tmp"
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            json.dump(merged_history[-500:], f, ensure_ascii=False, indent=2)
+        os.replace(tmp, user_history_fl)
+
+    # 移行元が無い場合も含め、一度確認したことを記録する。
+    with open(legacy_migration_marker, "w", encoding="utf-8") as f:
+        f.write("migrated\n")
+
+
+migrate_legacy_user_data()
 
 
 def read_dictionary_words():
@@ -2536,8 +2624,155 @@ def render_memory_game_section():
                 st.write(" / ".join(words))
 
 # ===========================
-# アプリ上から user_words.txt に単語追加
+# アプリ上から user_words.txt に単語追加・管理
 # ===========================
+
+def read_user_words_only():
+    """user_words.txt のみを重複なし・登録順維持で返す。"""
+    words = []
+    seen = set()
+    try:
+        with open(user_wd_fl, encoding="utf-8-sig") as f:
+            for line in f:
+                word = line.strip()
+                if not word or word.startswith("#") or word in seen:
+                    continue
+                seen.add(word)
+                words.append(word)
+    except FileNotFoundError:
+        pass
+    return words
+
+
+def write_user_words(words):
+    """user_words.txt を安全に書き直す。"""
+    cleaned = []
+    seen = set()
+    for word in words:
+        word = str(word).strip()
+        if not word or word.startswith("#") or word in seen:
+            continue
+        seen.add(word)
+        cleaned.append(word)
+
+    tmp_path = user_wd_fl + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8", newline="") as f:
+        if cleaned:
+            f.write("\n".join(cleaned) + "\n")
+    os.replace(tmp_path, user_wd_fl)
+
+
+def load_word_add_history():
+    """追加履歴JSONを読む。無い・壊れている場合は空履歴にする。"""
+    try:
+        with open(user_history_fl, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return []
+
+
+def save_word_add_history(history):
+    """追加履歴を安全に保存する。"""
+    tmp_path = user_history_fl + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8", newline="") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, user_history_fl)
+
+
+def record_word_add_history(source_label, added_words):
+    """実際に追加された語だけを1回分の履歴として記録する。"""
+    if not added_words:
+        return
+    history = load_word_add_history()
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    entry_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    history.append({
+        "id": entry_id,
+        "timestamp": stamp,
+        "source": source_label,
+        "words": list(added_words),
+        "remaining_words": list(added_words),
+    })
+    # 履歴ファイル肥大化防止。十分多めに500回分まで保持。
+    if len(history) > 500:
+        history = history[-500:]
+    save_word_add_history(history)
+
+
+def mark_words_removed_in_history(removed_words):
+    """個別削除された語を履歴側でも削除済みにする。"""
+    removed = set(removed_words)
+    if not removed:
+        return
+    history = load_word_add_history()
+    changed = False
+    for entry in history:
+        remaining = entry.get("remaining_words")
+        if not isinstance(remaining, list):
+            remaining = list(entry.get("words", []))
+        new_remaining = [w for w in remaining if w not in removed]
+        if new_remaining != remaining:
+            entry["remaining_words"] = new_remaining
+            changed = True
+    if changed:
+        save_word_add_history(history)
+
+
+def remove_user_words(words_to_remove):
+    """user_words.txt から指定語だけ削除する。戻り値は実際に削除した語。"""
+    targets = set(words_to_remove)
+    if not targets:
+        return []
+    current = read_user_words_only()
+    removed = [w for w in current if w in targets]
+    if not removed:
+        return []
+    kept = [w for w in current if w not in targets]
+    write_user_words(kept)
+    mark_words_removed_in_history(removed)
+    return removed
+
+
+def undo_history_entry(entry_id):
+    """指定した追加履歴のうち、まだ残っている語をまとめて取り消す。"""
+    history = load_word_add_history()
+    target = None
+    for entry in history:
+        if entry.get("id") == entry_id:
+            target = entry
+            break
+    if target is None:
+        return []
+
+    remaining = target.get("remaining_words")
+    if not isinstance(remaining, list):
+        remaining = list(target.get("words", []))
+
+    removed = remove_user_words(remaining)
+
+    # remove_user_words() でも履歴は更新されるが、対象履歴は確実に空にする。
+    history = load_word_add_history()
+    for entry in history:
+        if entry.get("id") == entry_id:
+            entry["remaining_words"] = []
+            entry["undone_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            break
+    save_word_add_history(history)
+    return removed
+
+
+def latest_active_history_entry():
+    """まだ1語以上残っている最新の追加履歴を返す。"""
+    for entry in reversed(load_word_add_history()):
+        remaining = entry.get("remaining_words")
+        if not isinstance(remaining, list):
+            remaining = list(entry.get("words", []))
+        if remaining:
+            return entry
+    return None
 
 def parse_word_lines(raw_text):
     """1行1語のテキストを正規化して返す。"""
@@ -2627,6 +2862,9 @@ def save_word_add_result(raw_text, source_label="入力"):
 
     added, duplicates, ignored_count = append_words_to_user_dictionary(raw_text)
 
+    if added:
+        record_word_add_history(source_label, added)
+
     st.cache_data.clear()
 
     if added:
@@ -2648,10 +2886,10 @@ def save_word_add_result(raw_text, source_label="入力"):
 
 
 def render_word_add_section():
-    with st.expander("単語を追加", expanded=False):
+    with st.expander("単語を追加・管理", expanded=False):
         st.caption(
-            "アプリから追加した単語は words.txt ではなく user_words.txt に保存します。"
-            "そのため、あとで words.txt を差し替えてもアプリ追加分は残ります。"
+            "アプリから追加した単語は、アプリ本体とは別の固定保存先にある user_words.txt に保存します。"
+            "そのため、Pythonファイルや words.txt を新版へ差し替えても追加分は残ります。"
         )
 
         notice = st.session_state.pop("word_add_notice", None)
@@ -2695,22 +2933,133 @@ def render_word_add_section():
             else:
                 try:
                     uploaded_text, encoding = decode_uploaded_txt(uploaded_txt)
-                    save_word_add_result(uploaded_text, f"{uploaded_txt.name}（{encoding}）")
+                    save_word_add_result(uploaded_text, f"TXT: {uploaded_txt.name}（{encoding}）")
                 except UnicodeDecodeError:
                     st.error("TXTの文字コードを読み取れませんでした。UTF-8 または Shift_JIS/CP932 で保存してください。")
                 except OSError as e:
                     st.error(f"user_words.txt に書き込めませんでした: {e}")
 
-        try:
-            with open(user_wd_fl, encoding="utf-8-sig") as f:
-                user_word_count = sum(
-                    1 for line in f
-                    if line.strip() and not line.strip().startswith("#")
-                )
-        except FileNotFoundError:
-            user_word_count = 0
+        user_words = read_user_words_only()
+        st.caption(f"アプリ追加単語: {len(user_words):,}語（user_words.txt）")
 
-        st.caption(f"アプリ追加単語: {user_word_count:,}語（user_words.txt）")
+        st.markdown("---")
+        st.markdown("**追加の取り消し・削除**")
+        st.caption("ここで削除するのは user_words.txt の単語だけです。words.txt 本体は変更しません。")
+
+        latest = latest_active_history_entry()
+        if latest:
+            latest_remaining = latest.get("remaining_words")
+            if not isinstance(latest_remaining, list):
+                latest_remaining = list(latest.get("words", []))
+            latest_source = latest.get("source", "追加")
+            latest_time = latest.get("timestamp", "")
+            st.caption(
+                f"直前の追加: {latest_time} / {latest_source} / 残り {len(latest_remaining):,}語"
+            )
+            if st.button("直前の追加を取り消す", key="undo_latest_word_add", use_container_width=True):
+                try:
+                    removed = undo_history_entry(latest.get("id", ""))
+                    st.cache_data.clear()
+                    if removed:
+                        st.session_state.word_add_notice = (
+                            "success",
+                            f"直前の追加から {len(removed)}語を削除しました。"
+                        )
+                    else:
+                        st.session_state.word_add_notice = (
+                            "info",
+                            "直前の追加に、現在 user_words.txt に残っている単語はありません。"
+                        )
+                    st.rerun()
+                except OSError as e:
+                    st.error(f"取り消しに失敗しました: {e}")
+        else:
+            st.caption("取り消せる追加履歴はありません。")
+
+        history = load_word_add_history()
+        active_history = []
+        for entry in reversed(history):
+            remaining = entry.get("remaining_words")
+            if not isinstance(remaining, list):
+                remaining = list(entry.get("words", []))
+            if remaining:
+                active_history.append((entry, remaining))
+
+        if active_history:
+            history_map = {}
+            labels = []
+            for entry, remaining in active_history[:100]:
+                label = (
+                    f"{entry.get('timestamp', '')}｜{entry.get('source', '追加')}｜"
+                    f"{len(remaining)}語"
+                )
+                # 同時刻・同名でも選択肢を一意にする。
+                if label in history_map:
+                    label += f"｜{entry.get('id', '')[-6:]}"
+                labels.append(label)
+                history_map[label] = entry
+
+            selected_history_label = st.selectbox(
+                "過去の追加履歴",
+                labels,
+                key="word_add_history_select",
+            )
+            selected_entry = history_map[selected_history_label]
+            selected_remaining = selected_entry.get("remaining_words", selected_entry.get("words", []))
+            with st.expander("選択した追加の単語を見る", expanded=False):
+                st.code("\n".join(selected_remaining))
+
+            if st.button("この追加をまとめて取り消す", key="undo_selected_word_add", use_container_width=True):
+                try:
+                    removed = undo_history_entry(selected_entry.get("id", ""))
+                    st.cache_data.clear()
+                    if removed:
+                        st.session_state.word_add_notice = (
+                            "success",
+                            f"選択した追加から {len(removed)}語を削除しました。"
+                        )
+                    else:
+                        st.session_state.word_add_notice = (
+                            "info",
+                            "この追加に、現在 user_words.txt に残っている単語はありません。"
+                        )
+                    st.rerun()
+                except OSError as e:
+                    st.error(f"取り消しに失敗しました: {e}")
+
+        user_words = read_user_words_only()
+        if user_words:
+            st.markdown("**追加済み単語を個別削除**")
+            selected_delete_words = st.multiselect(
+                "削除する単語を選択",
+                user_words,
+                key="user_word_delete_select",
+                placeholder="単語を検索して選択",
+            )
+            if st.button(
+                "選択した単語を削除",
+                key="delete_selected_user_words",
+                use_container_width=True,
+                disabled=not selected_delete_words,
+            ):
+                try:
+                    removed = remove_user_words(selected_delete_words)
+                    st.cache_data.clear()
+                    if removed:
+                        st.session_state.word_add_notice = (
+                            "success",
+                            f"{len(removed)}語を user_words.txt から削除しました。"
+                        )
+                    else:
+                        st.session_state.word_add_notice = (
+                            "info",
+                            "削除対象の単語は見つかりませんでした。"
+                        )
+                    st.rerun()
+                except OSError as e:
+                    st.error(f"単語の削除に失敗しました: {e}")
+        else:
+            st.caption("個別削除できるアプリ追加単語はありません。")
 
 
 # ===========================
