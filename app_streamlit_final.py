@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="母音検索システム", layout="wide")
 
-# 更新: あ段+い保持 / フラッシュカード自由文字数＋以上指定 / 韻パターン探し（全ルール対応） / アプリ内単語追加
+# 更新: フラッシュカード自由文字数＋以上指定 / 韻探し（全ルール対応・開閉式） / user_words.txt分離保存 / TXT一括追加
 
 
 def render_flying_words_background():
@@ -1067,11 +1067,52 @@ def add_length_count(length_counts, key):
 
 
 # ===========================
-# words.txt
+# 単語辞書
+# words.txt      : 基本単語帳（従来方式で差し替えてよい）
+# user_words.txt : アプリから追加した単語専用。words.txt を差し替えても残る。
 # ===========================
 
 fd = os.path.dirname(os.path.abspath(__file__))
 wd_fl = os.path.join(fd, "words.txt")
+user_wd_fl = os.path.join(fd, "user_words.txt")
+
+
+def read_dictionary_words():
+    """words.txt + user_words.txt を重複なし・登録順維持で返す。"""
+
+    words = []
+    used = set()
+
+    for path in (wd_fl, user_wd_fl):
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                for line in f:
+                    word = line.strip()
+                    if not word or word.startswith("#"):
+                        continue
+                    if word in used:
+                        continue
+                    used.add(word)
+                    words.append(word)
+        except FileNotFoundError:
+            # user_words.txt は初回起動時には無くてよい。
+            # words.txt が無い場合も、画面上で追加できるようここでは止めない。
+            continue
+
+    return words
+
+
+def dictionary_file_mtimes():
+    """キャッシュ更新判定用。基本辞書と追加辞書の更新時刻を返す。"""
+
+    result = []
+    for path in (wd_fl, user_wd_fl):
+        try:
+            result.append(os.path.getmtime(path))
+        except OSError:
+            result.append(0)
+    return tuple(result)
+
 
 def bud_dic(rl, us12):
 
@@ -1085,53 +1126,37 @@ def bud_dic(rl, us12):
         "6": 0,
         "7以上": 0,
     }
-    used = set()
     new_ct = 0
 
-    with open(wd_fl, encoding="utf-8") as f:
+    for word in read_dictionary_words():
 
-        for line in f:
+        red = prp_wd(word)
+        reading_by_word[word] = red
 
-            word = line.strip()
+        red_len = len(red)
 
-            if not word:
-                continue
+        # 最終キー、分類タグ、羅列削除前キーをまとめて作る。
+        vowel, hard_vowel, pre_rep_vowel = ext_keys_f_red(
+            red,
+            rl,
+            us12
+        )
 
-            if word.startswith("#"):
-                continue
+        if vowel not in new_dict:
+            new_dict[vowel] = []
 
-            if word in used:
-                continue
+        item = (word, red_len, hard_vowel, pre_rep_vowel, red)
 
-            used.add(word)
+        new_dict[vowel].append(item)
 
-            red = prp_wd(word)
-            reading_by_word[word] = red
+        if hard_vowel not in hard_index:
+            hard_index[hard_vowel] = []
 
-            red_len = len(red)
+        hard_index[hard_vowel].append(item)
 
-            # 最終キー、分類タグ、羅列削除前キーをまとめて作る。
-            vowel, hard_vowel, pre_rep_vowel = ext_keys_f_red(
-                red,
-                rl,
-                us12
-            )
+        add_length_count(length_counts, vowel)
 
-            if vowel not in new_dict:
-                new_dict[vowel] = []
-
-            item = (word, red_len, hard_vowel, pre_rep_vowel, red)
-
-            new_dict[vowel].append(item)
-
-            if hard_vowel not in hard_index:
-                hard_index[hard_vowel] = []
-
-            hard_index[hard_vowel].append(item)
-
-            add_length_count(length_counts, vowel)
-
-            new_ct += 1
+        new_ct += 1
 
     for key in new_dict:
         new_dict[key].sort(key=lambda x: x[1])
@@ -2097,14 +2122,14 @@ def render_flashcard_section():
 
 
 # ===========================
-# 韻パターン探し
+# 韻探し
 # ===========================
 
 @st.cache_data
-def ld_rhyme_finder_index(rl, words_mtime):
+def ld_rhyme_finder_index(rl, dictionary_mtimes):
     """
     選択した変換ルールの韻グループを文字数別に索引化する。
-    rl と words.txt の更新時刻をキャッシュキーに含めることで、
+    rl と words.txt / user_words.txt の更新時刻をキャッシュキーに含めることで、
     必要なルールだけを作成し、辞書更新時は自動で再構築する。
     """
 
@@ -2138,9 +2163,6 @@ def ld_rhyme_finder_index(rl, words_mtime):
 
 
 def render_rhyme_finder_section():
-
-    st.markdown("---")
-    st.subheader("韻パターン探し")
 
     with st.container(border=True):
         st.caption(
@@ -2197,12 +2219,8 @@ def render_rhyme_finder_section():
             st.info("変換ルール・文字数・条件を指定して『この条件を表示』を押してください。")
             return
 
-        try:
-            words_mtime = os.path.getmtime(wd_fl)
-        except OSError:
-            words_mtime = 0
-
-        groups_by_length, word_count = ld_rhyme_finder_index(active_rl, words_mtime)
+        mtimes = dictionary_file_mtimes()
+        groups_by_length, word_count = ld_rhyme_finder_index(active_rl, mtimes)
 
         if active_mode == "以上":
             groups = []
@@ -2392,9 +2410,6 @@ def render_memory_card_button(card, idx):
 
 def render_memory_game_section():
 
-    st.markdown("---")
-    st.subheader("単語神経衰弱")
-
     with st.container(border=True):
 
         st.caption("同じ検索キーになる単語ペアを6組見つけるゲームです。")
@@ -2496,17 +2511,11 @@ def render_memory_game_section():
                 st.write(" / ".join(words))
 
 # ===========================
-# アプリ上から words.txt に単語追加
+# アプリ上から user_words.txt に単語追加
 # ===========================
 
-def append_words_to_dictionary(raw_text):
-    """
-    入力された単語を words.txt に追記する。
-    - 1行1語
-    - 空行と # で始まる行は無視
-    - words.txt 内の既存語と、今回入力内の重複を除外
-    戻り値: (追加語リスト, 重複語リスト, 無視件数)
-    """
+def parse_word_lines(raw_text):
+    """1行1語のテキストを正規化して返す。"""
 
     requested = []
     seen_input = set()
@@ -2527,19 +2536,22 @@ def append_words_to_dictionary(raw_text):
         seen_input.add(word)
         requested.append(word)
 
+    return requested, duplicate_input, ignored_count
+
+
+def append_words_to_user_dictionary(raw_text):
+    """
+    入力された単語を user_words.txt に追記する。
+    words.txt と user_words.txt の両方を見て重複を除外する。
+    戻り値: (追加語リスト, 重複語リスト, 無視件数)
+    """
+
+    requested, duplicate_input, ignored_count = parse_word_lines(raw_text)
+
     if not requested:
         return [], duplicate_input, ignored_count
 
-    existing_words = set()
-    try:
-        with open(wd_fl, encoding="utf-8") as f:
-            for line in f:
-                word = line.strip()
-                if word and not word.startswith("#"):
-                    existing_words.add(word)
-    except FileNotFoundError:
-        pass
-
+    existing_words = set(read_dictionary_words())
     new_words = []
     duplicate_words = list(duplicate_input)
 
@@ -2551,10 +2563,9 @@ def append_words_to_dictionary(raw_text):
             existing_words.add(word)
 
     if new_words:
-        # 既存ファイルの末尾に改行がない場合だけ補う。
         needs_newline = False
         try:
-            with open(wd_fl, "rb") as f:
+            with open(user_wd_fl, "rb") as f:
                 f.seek(0, os.SEEK_END)
                 size = f.tell()
                 if size > 0:
@@ -2563,7 +2574,7 @@ def append_words_to_dictionary(raw_text):
         except FileNotFoundError:
             pass
 
-        with open(wd_fl, "a", encoding="utf-8", newline="") as f:
+        with open(user_wd_fl, "a", encoding="utf-8", newline="") as f:
             if needs_newline:
                 f.write("\n")
             f.write("\n".join(new_words))
@@ -2572,11 +2583,50 @@ def append_words_to_dictionary(raw_text):
     return new_words, duplicate_words, ignored_count
 
 
+def decode_uploaded_txt(uploaded_file):
+    """アップロードされたTXTを代表的な日本語エンコーディングで読む。"""
+
+    data = uploaded_file.getvalue()
+
+    for encoding in ("utf-8-sig", "utf-8", "cp932", "shift_jis"):
+        try:
+            return data.decode(encoding), encoding
+        except UnicodeDecodeError:
+            continue
+
+    raise UnicodeDecodeError("txt", data, 0, min(1, len(data)), "文字コードを判定できません")
+
+
+def save_word_add_result(raw_text, source_label="入力"):
+    """手入力・TXT共通の追加処理。追加後は全辞書キャッシュを更新する。"""
+
+    added, duplicates, ignored_count = append_words_to_user_dictionary(raw_text)
+
+    st.cache_data.clear()
+
+    if added:
+        message = f"{source_label}から {len(added)}語を user_words.txt に追加しました。"
+        if duplicates:
+            message += f" 重複 {len(duplicates)}語は追加していません。"
+        if ignored_count:
+            message += f" 空行・コメント {ignored_count}行を無視しました。"
+        st.session_state.word_add_notice = ("success", message)
+    elif duplicates:
+        message = f"追加された単語はありません。{len(duplicates)}語はすでに登録済みまたは入力内で重複しています。"
+        if ignored_count:
+            message += f" 空行・コメント {ignored_count}行を無視しました。"
+        st.session_state.word_add_notice = ("info", message)
+    else:
+        st.session_state.word_add_notice = ("warning", "追加できる単語がありません。")
+
+    st.rerun()
+
+
 def render_word_add_section():
     with st.expander("単語を追加", expanded=False):
         st.caption(
-            "words.txt に直接追加します。1行に1語ずつ入力してください。"
-            "同じ単語がすでに登録されている場合は自動で追加を省きます。"
+            "アプリから追加した単語は words.txt ではなく user_words.txt に保存します。"
+            "そのため、あとで words.txt を差し替えてもアプリ追加分は残ります。"
         )
 
         notice = st.session_state.pop("word_add_notice", None)
@@ -2589,41 +2639,83 @@ def render_word_add_section():
             else:
                 st.info(message)
 
+        st.markdown("**直接入力**")
         with st.form("word_add_form", clear_on_submit=True):
             raw_words = st.text_area(
-                "追加する単語",
+                "追加する単語（1行1語）",
                 placeholder="例：\nリトル・マーメイド\n高速道路\n宇宙空間",
                 height=150,
             )
-            submitted = st.form_submit_button("words.txt に追加", use_container_width=True)
+            submitted = st.form_submit_button("追加", use_container_width=True)
 
         if submitted:
             try:
-                added, duplicates, ignored_count = append_words_to_dictionary(raw_words)
+                save_word_add_result(raw_words, "直接入力")
             except OSError as e:
-                st.error(f"words.txt に書き込めませんでした: {e}")
-                return
+                st.error(f"user_words.txt に書き込めませんでした: {e}")
 
-            # 辞書・フラッシュカード・韻パターン探し等のキャッシュを全て更新する。
-            st.cache_data.clear()
+        st.markdown("**TXTファイルから追加**")
+        with st.form("word_add_txt_form", clear_on_submit=True):
+            uploaded_txt = st.file_uploader(
+                "1行1語のTXTファイルを選択",
+                type=["txt"],
+                accept_multiple_files=False,
+                key="word_add_txt_uploader",
+            )
+            upload_submitted = st.form_submit_button("TXTから追加", use_container_width=True)
 
-            if added:
-                message = f"{len(added)}語を追加しました。"
-                if duplicates:
-                    message += f" 重複 {len(duplicates)}語は追加していません。"
-                if ignored_count:
-                    message += f" 空行・コメント {ignored_count}行を無視しました。"
-                st.session_state.word_add_notice = ("success", message)
-            elif duplicates:
-                message = f"追加された単語はありません。{len(duplicates)}語はすでに登録済みまたは入力内で重複しています。"
-                if ignored_count:
-                    message += f" 空行・コメント {ignored_count}行を無視しました。"
-                st.session_state.word_add_notice = ("info", message)
+        if upload_submitted:
+            if uploaded_txt is None:
+                st.warning("TXTファイルを選択してください。")
             else:
-                st.session_state.word_add_notice = ("warning", "追加できる単語が入力されていません。")
+                try:
+                    uploaded_text, encoding = decode_uploaded_txt(uploaded_txt)
+                    save_word_add_result(uploaded_text, f"{uploaded_txt.name}（{encoding}）")
+                except UnicodeDecodeError:
+                    st.error("TXTの文字コードを読み取れませんでした。UTF-8 または Shift_JIS/CP932 で保存してください。")
+                except OSError as e:
+                    st.error(f"user_words.txt に書き込めませんでした: {e}")
 
-            # この実行時点では vw_dic が追加前の内容なので、即時反映のため再実行する。
+        try:
+            with open(user_wd_fl, encoding="utf-8-sig") as f:
+                user_word_count = sum(
+                    1 for line in f
+                    if line.strip() and not line.strip().startswith("#")
+                )
+        except FileNotFoundError:
+            user_word_count = 0
+
+        st.caption(f"アプリ追加単語: {user_word_count:,}語（user_words.txt）")
+
+
+# ===========================
+# 重い機能の開閉
+# ===========================
+
+def render_toggleable_section(title, state_key, button_key, renderer):
+    """閉じている間は renderer 自体を呼ばず、重い辞書構築やUI生成を避ける。"""
+
+    st.markdown("---")
+
+    if state_key not in st.session_state:
+        st.session_state[state_key] = False
+
+    is_open = bool(st.session_state[state_key])
+
+    left, right = st.columns([4, 1])
+    with left:
+        st.subheader(title)
+    with right:
+        button_label = "閉じる" if is_open else "開く"
+        if st.button(button_label, key=button_key, use_container_width=True):
+            st.session_state[state_key] = not is_open
             st.rerun()
+
+    if st.session_state[state_key]:
+        renderer()
+    else:
+        st.caption("閉じています。『開く』を押すと表示します。")
+
 
 # ===========================
 # GUI
@@ -2751,8 +2843,18 @@ with st.expander("変換テスト"):
 
 
 render_flashcard_section()
-render_rhyme_finder_section()
-render_memory_game_section()
+render_toggleable_section(
+    "韻探し",
+    "rhyme_finder_section_open",
+    "toggle_rhyme_finder_section",
+    render_rhyme_finder_section,
+)
+render_toggleable_section(
+    "単語神経衰弱",
+    "memory_game_section_open",
+    "toggle_memory_game_section",
+    render_memory_game_section,
+)
 
 with st.expander("未読漢字チェック"):
 
