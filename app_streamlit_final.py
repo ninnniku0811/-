@@ -1700,14 +1700,12 @@ def render_grouped_result(entries):
 # ===========================
 
 @st.cache_data
-def ld_flash_dic(
-    rl,
-    us12
-):
-    return bud_dic(
-        rl,
-        us12
-    )
+def _cached_ld_flash_dic(rl, us12, dictionary_mtimes):
+    return bud_dic(rl, us12)
+
+
+def ld_flash_dic(rl, us12):
+    return _cached_ld_flash_dic(rl, us12, dictionary_file_mtimes())
 
 def get_flash_candidates(vowel_dict, target_len, length_mode="ちょうど"):
     """指定文字数（ちょうど / 以上）に合い、2語以上ある検索キーだけを返す。"""
@@ -3258,14 +3256,12 @@ sch_md = st.radio(
 )
 
 @st.cache_data
-def ld_dic(
-    rl,
-    us12
-):
-    return bud_dic(
-        rl,
-        us12
-    )
+def _cached_ld_dic(rl, us12, dictionary_mtimes):
+    return bud_dic(rl, us12)
+
+
+def ld_dic(rl, us12):
+    return _cached_ld_dic(rl, us12, dictionary_file_mtimes())
 
 vw_dic, ct, hard_index, length_counts, reading_by_word = ld_dic(
     rl,
