@@ -1700,12 +1700,14 @@ def render_grouped_result(entries):
 # ===========================
 
 @st.cache_data
-def _cached_ld_flash_dic(rl, us12, dictionary_mtimes):
-    return bud_dic(rl, us12)
-
-
-def ld_flash_dic(rl, us12):
-    return _cached_ld_flash_dic(rl, us12, dictionary_file_mtimes())
+def ld_flash_dic(
+    rl,
+    us12
+):
+    return bud_dic(
+        rl,
+        us12
+    )
 
 def get_flash_candidates(vowel_dict, target_len, length_mode="ちょうど"):
     """指定文字数（ちょうど / 以上）に合い、2語以上ある検索キーだけを返す。"""
@@ -3256,12 +3258,14 @@ sch_md = st.radio(
 )
 
 @st.cache_data
-def _cached_ld_dic(rl, us12, dictionary_mtimes):
-    return bud_dic(rl, us12)
-
-
-def ld_dic(rl, us12):
-    return _cached_ld_dic(rl, us12, dictionary_file_mtimes())
+def ld_dic(
+    rl,
+    us12
+):
+    return bud_dic(
+        rl,
+        us12
+    )
 
 vw_dic, ct, hard_index, length_counts, reading_by_word = ld_dic(
     rl,
@@ -3485,232 +3489,234 @@ with st.expander("未読漢字チェック"):
             mime="text/plain"
         )
 
-with st.expander("同一かなチェック"):
+# ===========================
+# 同一かなチェック（軽量版）
+# ===========================
 
-    if "samekana_check_running" not in st.session_state:
-        st.session_state.samekana_check_running = False
+_SAME_KANA_REMOVE_RE = re.compile(r"[^ァ-ヶA-Za-zａ-ｚＡ-Ｚ]")
+
+
+@st.cache_data
+def build_same_kana_groups_cached(dictionary_mtimes):
+    """
+    words.txt + user_words.txt 全体から同一かなグループを作る。
+    辞書ファイルの更新時刻をキャッシュキーに含めるため、
+    単語追加・削除・辞書更新がない限り再計算しない。
+    """
+    del dictionary_mtimes  # キャッシュキーとしてのみ使用
+
+    from collections import defaultdict
+
+    kana_groups = defaultdict(list)
+
+    for word in read_dictionary_words():
+        kana = prp_wd(word)
+        # 旧版と同じ判定：カタカナ・アルファベット以外を除去。
+        kana = _SAME_KANA_REMOVE_RE.sub("", kana)
+        if kana:
+            kana_groups[kana].append(word)
+
+    # 完全に同じ読みが2語以上あるものだけ残す。
+    result = {
+        kana: tuple(words)
+        for kana, words in kana_groups.items()
+        if len(words) >= 2
+    }
+
+    return result
+
+
+def clear_samekana_page_widget_state():
+    """現在ページで生成済みのラジオボタン状態だけ破棄する。"""
+    for key in list(st.session_state.keys()):
+        if str(key).startswith("samekana_choice_"):
+            del st.session_state[key]
+
+
+with st.expander("同一かなチェック"):
 
     if "samekana_check_finished" not in st.session_state:
         st.session_state.samekana_check_finished = False
 
-    if "same_kana_groups" not in st.session_state:
-        st.session_state.same_kana_groups = {}
+    if "samekana_choices" not in st.session_state:
+        st.session_state.samekana_choices = {}
+
+    if "samekana_filtered_text" not in st.session_state:
+        st.session_state.samekana_filtered_text = ""
 
     if st.button("チェック開始", key="same_kana_check"):
+        # 重い計算はキャッシュされる。辞書が変わっていなければほぼ即時。
+        with st.spinner("同一かなをチェック中..."):
+            kana_groups = build_same_kana_groups_cached(dictionary_file_mtimes())
 
-        st.session_state.samekana_check_running = True
-        st.session_state.samekana_check_finished = False
-
-        st.rerun()
-
-    if st.session_state.samekana_check_running:
-
-        st.info("チェック中...")
-
-    if (
-        st.session_state.samekana_check_running
-        and
-        not st.session_state.samekana_check_finished
-    ):
-
-        from collections import defaultdict
-
-        # ------------------
-        # 同一かなグループ作成
-        # ------------------
-
-        kana_groups = defaultdict(list)
-
-        checked = set()
-
-        for words in vw_dic.values():
-
-            for word, *_ in words:
-
-                if word in checked:
-                    continue
-
-                checked.add(word)
-
-                import re
-
-                def normalize_same_kana(word):
-
-                    kana = reading_by_word.get(word)
-
-                    if kana is None:
-                        kana = knf(word)
-
-                    # カタカナ・アルファベット以外を除去
-                    kana = re.sub(
-                        r"[^ァ-ヶA-Za-zａ-ｚＡ-Ｚ]",
-                        "",
-                        kana
-                    )
-
-                    return kana
-
-                kana = normalize_same_kana(word)
-                kana_groups[kana].append(word)
-
-        # 2語以上だけ残す
-        kana_groups = {
-            k: v
-            for k, v in kana_groups.items()
-            if len(v) >= 2
+        # 以前のチェック結果にしか存在しない選択状態は捨てる。
+        old_choices = st.session_state.get("samekana_choices", {})
+        st.session_state.samekana_choices = {
+            kana: choice
+            for kana, choice in old_choices.items()
+            if kana in kana_groups
         }
-
-        st.session_state.same_kana_groups = kana_groups
-
-        st.session_state.samekana_check_running = False
         st.session_state.samekana_check_finished = True
-
-        st.rerun()
-
-    kana_groups = st.session_state.get(
-        "same_kana_groups",
-        {}
-    )
+        st.session_state.samekana_filtered_text = ""
+        clear_samekana_page_widget_state()
 
     if st.session_state.samekana_check_finished:
+
+        kana_groups = build_same_kana_groups_cached(dictionary_file_mtimes())
+        sorted_groups = sorted(
+            kana_groups.items(),
+            key=lambda x: (-len(x[1]), x[0])
+        )
+
         st.success("チェック終了")
+        st.write(f"同一かなグループ数: {len(sorted_groups):,}")
 
-    if st.session_state.samekana_check_finished:
+        if not sorted_groups:
+            st.info("同じ読みの単語はありません。")
+        else:
+            choices = st.session_state.samekana_choices
 
-        kana_groups = st.session_state.same_kana_groups
+            # 一括操作は全グループに対して辞書1個を書き換えるだけ。
+            # 数千個のStreamlitウィジェット状態は作らない。
+            col1, col2, col3 = st.columns(3)
 
-        st.write(f"同一かなグループ数: {len(kana_groups)}")
+            with col1:
+                if st.button("全て除去しない", key="samekana_all_keep"):
+                    st.session_state.samekana_choices = {
+                        kana: "（どれも除去しない）"
+                        for kana, _ in sorted_groups
+                    }
+                    st.session_state.samekana_filtered_text = ""
+                    clear_samekana_page_widget_state()
+                    st.rerun()
 
-        col1, col2, col3 = st.columns(3)
+            with col2:
+                if st.button("全て一番上を選択", key="samekana_all_first"):
+                    st.session_state.samekana_choices = {
+                        kana: words[0]
+                        for kana, words in sorted_groups
+                        if words
+                    }
+                    st.session_state.samekana_filtered_text = ""
+                    clear_samekana_page_widget_state()
+                    st.rerun()
 
-        with col1:
-            if st.button("全て除去しない"):
+            with col3:
+                if st.button("全て一番下を選択", key="samekana_all_last"):
+                    st.session_state.samekana_choices = {
+                        kana: words[-1]
+                        for kana, words in sorted_groups
+                        if words
+                    }
+                    st.session_state.samekana_filtered_text = ""
+                    clear_samekana_page_widget_state()
+                    st.rerun()
 
-                for idx, (_, words) in enumerate(
-                    sorted(
-                        kana_groups.items(),
-                        key=lambda x: len(x[1]),
-                        reverse=True
-                    )
-                ):
-                    st.session_state[f"samekana_{idx}"] = "（どれも除去しない）"
+            # 画面上に全グループ分のradioを生成するとスマホ/クラウドで落ちやすいのでページ分割。
+            page_size = 20
+            total_pages = max(1, (len(sorted_groups) + page_size - 1) // page_size)
+            page = int(st.number_input(
+                "ページ",
+                min_value=1,
+                max_value=total_pages,
+                value=min(
+                    int(st.session_state.get("samekana_page_value", 1)),
+                    total_pages,
+                ),
+                step=1,
+                key="samekana_page_value",
+            ))
 
-                st.rerun()
+            start_idx = (page - 1) * page_size
+            end_idx = min(start_idx + page_size, len(sorted_groups))
+            page_groups = sorted_groups[start_idx:end_idx]
 
-        with col2:
-            if st.button("全て一番上を選択"):
-
-                for idx, (_, words) in enumerate(
-                    sorted(
-                        kana_groups.items(),
-                        key=lambda x: len(x[1]),
-                        reverse=True
-                    )
-                ):
-                    if words:
-                        st.session_state[f"samekana_{idx}"] = words[0]
-
-                st.rerun()
-
-        with col3:
-            if st.button("全て一番下を選択"):
-
-                for idx, (_, words) in enumerate(
-                    sorted(
-                        kana_groups.items(),
-                        key=lambda x: len(x[1]),
-                        reverse=True
-                    )
-                ):
-                    if words:
-                        st.session_state[f"samekana_{idx}"] = words[-1]
-
-                st.rerun()
-
-        selected_map = {}
-
-        for idx, (kana, words) in enumerate(
-            sorted(
-                kana_groups.items(),
-                key=lambda x: len(x[1]),
-                reverse=True
-            )
-        ):
-
-            st.markdown(
-                f"### {kana} （{len(words)}語）"
-            )
-
-            options = ["（どれも除去しない）"] + words
-
-            selected = st.radio(
-                "残す単語",
-                options,
-                key=f"samekana_{idx}",
-                label_visibility="collapsed"
+            st.caption(
+                f"{start_idx + 1:,}〜{end_idx:,}グループ目 / "
+                f"全{len(sorted_groups):,}グループ（{page}/{total_pages}ページ）"
             )
 
-            selected_map[kana] = selected
+            for global_idx, (kana, words_tuple) in enumerate(
+                page_groups,
+                start=start_idx,
+            ):
+                words = list(words_tuple)
+                st.markdown(f"### {kana} （{len(words)}語）")
 
-        # ------------------
-        # words.txt生成
-        # ------------------
+                options = ["（どれも除去しない）"] + words
+                current = choices.get(kana, "（どれも除去しない）")
+                if current not in options:
+                    current = "（どれも除去しない）"
 
-        all_words = []
+                widget_key = f"samekana_choice_{global_idx}"
+                # ページへ初めて表示された時だけ保存済み選択をradioへ反映。
+                if widget_key not in st.session_state:
+                    st.session_state[widget_key] = current
 
-        with open(wd_fl, encoding="utf-8") as f:
+                selected = st.radio(
+                    "残す単語",
+                    options,
+                    key=widget_key,
+                    label_visibility="collapsed",
+                )
 
-            for line in f:
+                if choices.get(kana) != selected:
+                    choices[kana] = selected
+                    st.session_state.samekana_choices = choices
+                    # 選択を変更したら以前生成した除外版は古くなるため無効化。
+                    st.session_state.samekana_filtered_text = ""
 
-                word = line.strip()
+            # 全単語のフィルタ処理と巨大なtext_area生成は、選択変更のたびには行わない。
+            if st.button(
+                "現在の選択で除外版を作成",
+                key="samekana_build_filtered",
+                use_container_width=True,
+            ):
+                word_to_kana = {}
+                for kana, words_tuple in sorted_groups:
+                    for word in words_tuple:
+                        word_to_kana[word] = kana
 
-                if not word:
-                    continue
+                selected_map = st.session_state.samekana_choices
+                filtered_words = []
 
-                if word.startswith("#"):
-                    continue
+                # 旧仕様どおり、出力対象は基本辞書 words.txt。
+                try:
+                    with open(wd_fl, encoding="utf-8-sig") as f:
+                        for line in f:
+                            word = line.strip()
+                            if not word or word.startswith("#"):
+                                continue
 
-                all_words.append(word)
+                            kana = word_to_kana.get(word)
+                            if kana is None:
+                                filtered_words.append(word)
+                                continue
 
-        # 単語 → グループかな
-        word_to_kana = {}
+                            selected = selected_map.get(
+                                kana,
+                                "（どれも除去しない）",
+                            )
 
-        for kana, words in kana_groups.items():
-            for word in words:
-                word_to_kana[word] = kana
+                            if selected == "（どれも除去しない）" or word == selected:
+                                filtered_words.append(word)
+                except FileNotFoundError:
+                    filtered_words = []
 
-        filtered_words = []
+                st.session_state.samekana_filtered_text = "\n".join(filtered_words)
 
-        for word in all_words:
+            filtered_text = st.session_state.get("samekana_filtered_text", "")
+            if filtered_text:
+                st.text_area(
+                    "同一かな除外版 words.txt",
+                    filtered_text,
+                    height=300,
+                )
 
-            if word not in word_to_kana:
-                filtered_words.append(word)
-                continue
-
-            kana = word_to_kana[word]
-            selected = selected_map[kana]
-
-            # 「どれも除去しない」
-            if selected == "（どれも除去しない）":
-                filtered_words.append(word)
-
-            # 選ばれた単語だけ残す
-            elif word == selected:
-                filtered_words.append(word)
-
-        filtered_text = "\n".join(
-            filtered_words
-        )
-
-        st.text_area(
-            "同一かな除外版 words.txt",
-            filtered_text,
-            height=400
-        )
-
-        st.download_button(
-            "除外版をダウンロード",
-            filtered_text,
-            file_name="words_samekana_filtered.txt",
-            mime="text/plain"
-        )
+                st.download_button(
+                    "除外版をダウンロード",
+                    filtered_text,
+                    file_name="words_samekana_filtered.txt",
+                    mime="text/plain",
+                    key="samekana_download_filtered",
+                )
