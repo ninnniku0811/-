@@ -1519,16 +1519,64 @@ def tag_display_order_info(word, red, hard_key):
     if has_kanji and any(ch in normalized for ch in ("ん", "ン", "っ", "ッ", "ー")):
         has_syllable_mark = True
 
-    if has_syllable_mark:
-        tier = 1
-    elif trailing_same >= 4:
+    # 語末同母音3連続以上は、ん・っ・ー等の音節要素より優先する。
+    # 例：いたわりロボット は「っ」を含むが、語末3連続グループに入れる。
+    if trailing_same >= 4:
         tier = 3
     elif trailing_same == 3:
         tier = 2
+    elif has_syllable_mark:
+        tier = 1
     else:
         tier = 0
 
     return tier, len(red), word
+
+
+def order_search_tag_groups(groups):
+    """
+    語末同母音2個を残した派生タグを、元の通常タグの直下へ置く。
+    例：いあいお → いあいおお
+    それ以外は元の出現順をなるべく維持する。
+    """
+    if not groups:
+        return groups
+
+    by_key = {g.get("hard_key", ""): g for g in groups}
+    original_index = {g.get("hard_key", ""): i for i, g in enumerate(groups)}
+    emitted = set()
+    ordered = []
+
+    for g in groups:
+        key = g.get("hard_key", "")
+        if key in emitted:
+            continue
+
+        # このタグ自身が「末尾同母音2個」の派生タグで、元タグが存在する場合は
+        # 元タグ側の処理時に直下へ出すのでここでは飛ばす。
+        if len(key) >= 2 and key[-1] == key[-2]:
+            base_key = key[:-1]
+            if base_key in by_key:
+                continue
+
+        ordered.append(g)
+        emitted.add(key)
+
+        # 元タグの直下に、末尾母音を1個増やした派生タグを置く。
+        if key:
+            derived_key = key + key[-1]
+            if derived_key in by_key and derived_key not in emitted:
+                ordered.append(by_key[derived_key])
+                emitted.add(derived_key)
+
+    # 念のため未出力があれば元順で末尾へ。
+    for g in groups:
+        key = g.get("hard_key", "")
+        if key not in emitted:
+            ordered.append(g)
+            emitted.add(key)
+
+    return ordered
 
 
 def make_grouped_lines(entries):
@@ -1558,6 +1606,10 @@ def make_grouped_lines(entries):
             "kind": "normal",
             "source_key": hard_key,
         })
+
+    # 検索タグ全体の順序を整理する。
+    # 語末同母音2個を残した派生タグは、元の通常タグの直下へ置く。
+    groups = order_search_tag_groups(groups)
 
     display_items = []
     copy_words_base = []
