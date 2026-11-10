@@ -1487,6 +1487,57 @@ def middle_u_remove_distance(source_key, target_key, max_remove=2):
 
 
 
+def display_sort_length(red):
+    """
+    同一検索タグ内の表示順に使う長さ。
+    ・普通の文字 = 1
+    ・音節部分（ん/っ/ー、長音として読む後続の い/う） = 0.5
+    ・最後の文字が音節部分なら、その最後の1文字は数えない
+    """
+    chars = list(red)
+    if not chars:
+        return 0.0
+
+    syllable_flags = [False] * len(chars)
+
+    # ん・っ・ー は音節部分。
+    for i, ch in enumerate(chars):
+        if ch in ("ん", "ン", "っ", "ッ", "ー"):
+            syllable_flags[i] = True
+
+    # え段+い / お段+う / う段+う の後ろ側は長音相当の音節部分。
+    # 小さい仮名の直後（例：きょう）の「う」も、その小さい仮名の母音で判定する。
+    for i in range(1, len(chars)):
+        ch = chars[i]
+        if ch not in ("い", "イ", "う", "ウ"):
+            continue
+
+        prev = chars[i - 1]
+        if prev in sm_mp:
+            prev_vowel = sm_mp[prev]
+        else:
+            prev_vowel = vw_mp.get(prev)
+
+        if ch in ("い", "イ") and prev_vowel == "え":
+            syllable_flags[i] = True
+        elif ch in ("う", "ウ") and prev_vowel in ("お", "う"):
+            syllable_flags[i] = True
+
+    total = 0.0
+    last_index = len(chars) - 1
+
+    for i, _ch in enumerate(chars):
+        if syllable_flags[i]:
+            # 語末の音節部分は完全に数えない。
+            if i == last_index:
+                continue
+            total += 0.5
+        else:
+            total += 1.0
+
+    return total
+
+
 def tag_display_order_info(word, red, hard_key):
     """
     同じ検索タグ内の表示順を決める。
@@ -1552,7 +1603,7 @@ def tag_display_order_info(word, red, hard_key):
     else:
         tier = 0
 
-    return tier, len(red), word
+    return tier, display_sort_length(red), word
 
 
 def order_search_tag_groups(groups):
