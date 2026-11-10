@@ -1491,6 +1491,7 @@ def display_sort_length(red):
     """
     同一検索タグ内の表示順に使う長さ。
     ・普通の文字 = 1
+    ・拗音（きょ/しゃ/ちゅ 等）は2文字で1
     ・音節部分（ん/っ/ー、長音として読む後続の い/う） = 0.5
     ・最後の文字が音節部分なら、その最後の1文字は数えない
     """
@@ -1525,15 +1526,28 @@ def display_sort_length(red):
 
     total = 0.0
     last_index = len(chars) - 1
+    i = 0
 
-    for i, _ch in enumerate(chars):
+    while i < len(chars):
+        ch = chars[i]
+
+        # 拗音・小書き仮名は、直前のかなと合わせて1文字分として数える。
+        # 例：キョ = 1、シュ = 1、チャ = 1
+        if i + 1 < len(chars) and chars[i + 1] in sm_mp:
+            total += 1.0
+            i += 2
+            continue
+
         if syllable_flags[i]:
             # 語末の音節部分は完全に数えない。
             if i == last_index:
+                i += 1
                 continue
             total += 0.5
         else:
             total += 1.0
+
+        i += 1
 
     return total
 
