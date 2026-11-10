@@ -491,6 +491,26 @@ def rem_no_vw(seq):
     return [x for x in seq if x in ["あ","い","う","え","お"]]
 
 
+def keep_final_double_for_tag(raw_vowels, tag_vowels):
+    """検索タグ専用：語末で同じ母音が2個以上続く場合は、末尾をちょうど2個残す。"""
+    raw = list(raw_vowels)
+    tag = list(tag_vowels)
+
+    if len(raw) < 2 or raw[-1] != raw[-2]:
+        return tag
+
+    final_vowel = raw[-1]
+
+    # タグ末尾の同一母音は一度1個にそろえ、その後もう1個足して最大2個にする。
+    while len(tag) >= 2 and tag[-1] == final_vowel and tag[-2] == final_vowel:
+        tag.pop()
+
+    if tag and tag[-1] == final_vowel:
+        tag.append(final_vowel)
+
+    return tag
+
+
 def rem_mid_vw(vowels, target):
     while True:
         rmd = False
@@ -775,16 +795,21 @@ def ext_group_key_f_red(red, rl=2):
 
     word = st0(red, remove_sokuon=True)
     seq = st1(word)
+    raw_vowels_for_tag = rem_no_vw(seq)
 
     seq, stop = rem_dup(seq)
     if stop:
-        return "".join(rem_no_vw(seq))
+        tag_vowels = keep_final_double_for_tag(raw_vowels_for_tag, rem_no_vw(seq))
+        return "".join(tag_vowels)
 
     vowels = rem_no_vw(seq)
 
     vowels, stop = rem_dup(vowels)
     if stop:
-        return "".join(vowels)
+        tag_vowels = keep_final_double_for_tag(raw_vowels_for_tag, vowels)
+        return "".join(tag_vowels)
+
+    vowels = keep_final_double_for_tag(raw_vowels_for_tag, vowels)
 
     # ここで止める。
     # 中間う/い削除、最後の重複削除、羅列削除はしない。
@@ -1084,20 +1109,24 @@ def ext_keys_f_red(red, rl=2, us12=True):
 
     word = st0(red, remove_sokuon=True)
     seq = st1(word)
+    raw_vowels_for_tag = rem_no_vw(seq)
 
     seq, stop = rem_dup(seq)
     if stop:
-        key = "".join(rem_no_vw(seq))
-        return key, key, key
+        key_vowels = rem_no_vw(seq)
+        key = "".join(key_vowels)
+        hard_vowel = "".join(keep_final_double_for_tag(raw_vowels_for_tag, key_vowels))
+        return key, hard_vowel, key
 
     vowels = rem_no_vw(seq)
 
     vowels, stop = rem_dup(vowels)
     if stop:
         key = "".join(vowels)
-        return key, key, key
+        hard_vowel = "".join(keep_final_double_for_tag(raw_vowels_for_tag, vowels))
+        return key, hard_vowel, key
 
-    hard_vowel = "".join(vowels)
+    hard_vowel = "".join(keep_final_double_for_tag(raw_vowels_for_tag, vowels))
 
     if rl >= 2:
         vowels, stop = rem_mid_vw(vowels, "う")
