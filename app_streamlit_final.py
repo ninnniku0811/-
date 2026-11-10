@@ -1486,6 +1486,51 @@ def middle_u_remove_distance(source_key, target_key, max_remove=2):
     return None
 
 
+
+def tag_display_order_info(word, red, hard_key):
+    """
+    同じ検索タグ内の表示順を決める。
+    0: 普通の同母音2連続
+    1: ん・っ・ー等の音節要素を含む
+    2: 語末同母音3連続
+    3: 語末同母音4連続以上
+
+    各区分内は読み文字数が短い順。
+    """
+    target = hard_key[-1] if hard_key else None
+
+    # 元の読みを、検索タグ生成時に近い形へそろえる。
+    normalized = st0(red, remove_sokuon=False)
+    vowel_seq = rem_no_vw(st1(normalized))
+
+    trailing_same = 0
+    if target:
+        for ch in reversed(vowel_seq):
+            if ch == target:
+                trailing_same += 1
+            else:
+                break
+
+    # 元の読みで明示されている音節要素を優先。
+    has_syllable_mark = any(ch in red for ch in ("ん", "ン", "っ", "ッ", "ー"))
+
+    # 漢字語など、長音処理によって音節記号が現れるものも音節系として扱う。
+    has_kanji = bool(re.search(r"[一-龯々〆ヵヶ]", word))
+    if has_kanji and any(ch in normalized for ch in ("ん", "ン", "っ", "ッ", "ー")):
+        has_syllable_mark = True
+
+    if has_syllable_mark:
+        tier = 1
+    elif trailing_same >= 4:
+        tier = 3
+    elif trailing_same == 3:
+        tier = 2
+    else:
+        tier = 0
+
+    return tier, len(red), word
+
+
 def make_grouped_lines(entries):
 
     groups = []
@@ -1504,9 +1549,12 @@ def make_grouped_lines(entries):
                 "items": []
             })
 
+        red = item[4] if len(item) >= 5 else prp_wd(word)
+
         groups[index[hard_key]]["items"].append({
             "word": word,
             "red_len": red_len,
+            "red": red,
             "kind": "normal",
             "source_key": hard_key,
         })
@@ -1553,6 +1601,7 @@ def make_grouped_lines(entries):
                 attachments[best_target].append({
                     "word": item["word"],
                     "red_len": item.get("red_len", 0),
+                    "red": item.get("red", prp_wd(item["word"])),
                     "source_key": src_key,
                     "kind": color_type,
                 })
@@ -1573,15 +1622,30 @@ def make_grouped_lines(entries):
                 combined.append({
                     "word": item["word"],
                     "red_len": item.get("red_len", 0),
+                    "red": item.get("red", prp_wd(item["word"])),
                     "kind": "normal",
                     "source_key": hard_key,
                 })
             combined.extend(attached)
 
-            # 普通の結果一覧に自然に混ざるよう、読み長さ順で並べる。
-            # 同じ長さなら通常→赤→紫の順にして、元の見え方をなるべく保つ。
+            # 同じ検索タグ内は、語末構造の種類 → 読み文字数の短い順で並べる。
+            # 同順位では通常→赤→紫の順。
             kind_order = {"normal": 0, "red": 1, "purple": 2}
-            combined.sort(key=lambda x: (x.get("red_len", 0), kind_order.get(x.get("kind"), 9), x.get("word", "")))
+            for x in combined:
+                x["_display_tier"], x["_display_len"], x["_display_word"] = tag_display_order_info(
+                    x.get("word", ""),
+                    x.get("red", ""),
+                    hard_key,
+                )
+
+            combined.sort(
+                key=lambda x: (
+                    x.get("_display_tier", 0),
+                    x.get("_display_len", x.get("red_len", 0)),
+                    kind_order.get(x.get("kind"), 9),
+                    x.get("_display_word", x.get("word", "")),
+                )
+            )
 
             base_words = [x["word"] for x in combined if x.get("kind") == "normal"]
             all_words = [x["word"] for x in combined]
@@ -1593,7 +1657,17 @@ def make_grouped_lines(entries):
                 "copy_text_all": "\n".join(all_words),
             })
 
+            prev_tier = None
             for item in combined:
+                current_tier = item.get("_display_tier", 0)
+
+                # 表示区分が切り替わるところだけ1行空ける。
+                if prev_tier is not None and current_tier != prev_tier:
+                    display_items.append({
+                        "type": "blank",
+                        "text": ""
+                    })
+
                 if item.get("kind") == "red":
                     item_type = "word_red"
                 elif item.get("kind") == "purple":
@@ -1610,6 +1684,8 @@ def make_grouped_lines(entries):
                 if item.get("kind") == "normal":
                     copy_words_base.append(item["word"])
                 copy_words_all.append(item["word"])
+
+                prev_tier = current_tier
 
             # グループ間だけ空ける
             display_items.append({
