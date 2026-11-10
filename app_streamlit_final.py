@@ -1501,7 +1501,8 @@ def tag_display_order_info(word, red, hard_key):
 
     # 元の読みを、検索タグ生成時に近い形へそろえる。
     normalized = st0(red, remove_sokuon=False)
-    vowel_seq = rem_no_vw(st1(normalized))
+    full_seq = st1(normalized)
+    vowel_seq = rem_no_vw(full_seq)
 
     trailing_same = 0
     if target:
@@ -1511,13 +1512,34 @@ def tag_display_order_info(word, red, hard_key):
             else:
                 break
 
-    # 元の読みで明示されている音節要素を優先。
-    has_syllable_mark = any(ch in red for ch in ("ん", "ン", "っ", "ッ", "ー"))
+    # 「音節を含む」判定は、単語全体ではなく
+    # 最後の同母音羅列の範囲だけを見る。
+    #
+    # 例:
+    #   視界良好   ... お・ー・お・ー  → 音節あり
+    #   立体音響   ... お・ん・お      → 音節あり
+    # 語の前半など、最後の羅列より前にある ん/っ/ー は無視する。
+    suffix_seq = []
+    if target and trailing_same >= 2:
+        seen_target = 0
+        for ch in reversed(full_seq):
+            if ch in ("あ", "い", "う", "え", "お"):
+                if ch != target:
+                    break
+                seen_target += 1
+                suffix_seq.append(ch)
+                if seen_target >= trailing_same:
+                    break
+            else:
+                # 最後の同母音羅列の間にある音節要素も保持する。
+                suffix_seq.append(ch)
 
-    # 漢字語など、長音処理によって音節記号が現れるものも音節系として扱う。
-    has_kanji = bool(re.search(r"[一-龯々〆ヵヶ]", word))
-    if has_kanji and any(ch in normalized for ch in ("ん", "ン", "っ", "ッ", "ー")):
-        has_syllable_mark = True
+        suffix_seq.reverse()
+
+    has_syllable_mark = any(
+        ch in ("ん", "ン", "っ", "ッ", "ー")
+        for ch in suffix_seq
+    )
 
     # 語末同母音3連続以上は、ん・っ・ー等の音節要素より優先する。
     # 例：いたわりロボット は「っ」を含むが、語末3連続グループに入れる。
